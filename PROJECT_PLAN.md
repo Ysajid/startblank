@@ -81,8 +81,10 @@ Two intermediate ratios:
 
 - **Revision Density** — how much correction/editing happened relative to
   the size of the finished piece (signal that the author refined their
-  work rather than dumping a first draft):
-  `RD = E / L`
+  work rather than dumping a first draft). Weighted down by `w_e = 0.5` so
+  raw backspace/edit counts move the score less than typing or pasting do
+  — editing is a supporting signal, not the main one:
+  `RD = (w_e × E) / L`, `w_e = 0.5`
 
 Revision credit, capped so editing alone can't be gamed into an infinite
 score, with a 0.5 baseline for clean, unedited typing:
@@ -100,7 +102,11 @@ score, with a 0.5 baseline for clean, unedited typing:
   it — you can't paste a paragraph and edit your way to a high score.
 - `f(RD)` gives a fair floor (50/100) to someone who types cleanly with no
   paste and no edits, and rewards visible revision on top of that, capped
-  at 100 so obsessive backspacing doesn't dominate the formula.
+  at 100 so obsessive backspacing doesn't dominate the formula. The `w_e`
+  weight on `E` keeps that reward modest — edits move the score, but only
+  about half as fast as an equivalent amount of clean typing or pasting
+  would, so a document can't inflate its score just by racking up
+  backspaces.
 - Everything is derived from *counts*, not content, so it's cheap to
   compute, doesn't require storing keystroke logs, and is easy to display
   or explain to the user.
@@ -110,11 +116,13 @@ score, with a 0.5 baseline for clean, unedited typing:
 | Scenario | K | E | Pc | L | OR | PR | RD | Score |
 |---|---|---|---|---|---|---|---|---|
 | Typed clean, no edits, no paste | 500 | 0 | 0 | 500 | 1.0 | 0 | 0 | 50 |
-| Typed + heavily revised, no paste | 500 | 300 | 0 | 500 | 1.0 | 0 | 0.6 | 100* |
-| Half pasted, rest typed & edited | 250 | 100 | 250 | 500 | 0.5 | 0.5 | 0.2 | 17.5 |
+| Typed + heavily revised, no paste | 500 | 300 | 0 | 500 | 1.0 | 0 | 0.3 | 80 |
+| Half pasted, rest typed & edited | 250 | 100 | 250 | 500 | 0.5 | 0.5 | 0.1 | 15 |
 | Entirely pasted | 0 | 0 | 500 | 500 | 0 | 1.0 | 0 | 0 |
 
-*capped at 100 by `min(1, 0.5+RD)`.
+Reaching the full revision cap (`f(RD)=1`, RD=0.5) now takes `E = L` —
+edits equal to the whole document's length — rather than `E = 0.5L` as
+before.
 
 ### 5.5 Open calibration question
 
