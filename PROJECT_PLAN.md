@@ -81,15 +81,15 @@ Two intermediate ratios:
 
 - **Revision Density** — how much correction/editing happened relative to
   the size of the finished piece (signal that the author refined their
-  work rather than dumping a first draft). Weighted down by `w_e = 0.5` so
-  raw backspace/edit counts move the score less than typing or pasting do
-  — editing is a supporting signal, not the main one:
-  `RD = (w_e × E) / L`, `w_e = 0.5`
+  work rather than dumping a first draft):
+  `RD = E / L`
 
-Revision credit, capped so editing alone can't be gamed into an infinite
-score, with a 0.5 baseline for clean, unedited typing:
+Revision credit, with a **0.9 baseline** for clean, unedited typing —
+simply writing your own words already scores highly — and only a small
+additional 0.1 available from editing, capped so editing can't run away
+with the score:
 
-  `f(RD) = min(1, 0.5 + RD)`
+  `f(RD) = min(1, 0.9 + 0.1 × RD)`
 
 **Blank Score** (0–100):
 
@@ -100,13 +100,12 @@ score, with a 0.5 baseline for clean, unedited typing:
 - Multiplying (rather than averaging) `OR` and `(1 − PR)` means heavy
   pasting tanks the score regardless of how much editing happened around
   it — you can't paste a paragraph and edit your way to a high score.
-- `f(RD)` gives a fair floor (50/100) to someone who types cleanly with no
-  paste and no edits, and rewards visible revision on top of that, capped
-  at 100 so obsessive backspacing doesn't dominate the formula. The `w_e`
-  weight on `E` keeps that reward modest — edits move the score, but only
-  about half as fast as an equivalent amount of clean typing or pasting
-  would, so a document can't inflate its score just by racking up
-  backspaces.
+- `f(RD)` gives a high floor (90/100) to anyone who types their own words
+  with no paste at all — that's the primary signal of "purity." Editing on
+  top of that is real but secondary: it can only add another 10 points,
+  reaching the full 100 once edits are at least as numerous as the final
+  document's length (`RD ≥ 1`). Editing nudges the score, it doesn't
+  define it.
 - Everything is derived from *counts*, not content, so it's cheap to
   compute, doesn't require storing keystroke logs, and is easy to display
   or explain to the user.
@@ -115,19 +114,19 @@ score, with a 0.5 baseline for clean, unedited typing:
 
 | Scenario | K | E | Pc | L | OR | PR | RD | Score |
 |---|---|---|---|---|---|---|---|---|
-| Typed clean, no edits, no paste | 500 | 0 | 0 | 500 | 1.0 | 0 | 0 | 50 |
-| Typed + heavily revised, no paste | 500 | 300 | 0 | 500 | 1.0 | 0 | 0.3 | 80 |
-| Half pasted, rest typed & edited | 250 | 100 | 250 | 500 | 0.5 | 0.5 | 0.1 | 15 |
+| Typed clean, no edits, no paste | 500 | 0 | 0 | 500 | 1.0 | 0 | 0 | 90 |
+| Typed & fully revised, no paste | 500 | 500 | 0 | 500 | 1.0 | 0 | 1.0 | 100 |
+| Half pasted, rest typed & edited | 250 | 100 | 250 | 500 | 0.5 | 0.5 | 0.2 | 23 |
 | Entirely pasted | 0 | 0 | 500 | 500 | 0 | 1.0 | 0 | 0 |
 
-Reaching the full revision cap (`f(RD)=1`, RD=0.5) now takes `E = L` —
-edits equal to the whole document's length — rather than `E = 0.5L` as
-before.
+Reaching the full revision cap (`f(RD) = 1`) takes `E ≥ L` — at least as
+many edits as the document's final length. Anything less lands somewhere
+between 90 and 100, in proportion to `RD`.
 
 ### 5.5 Open calibration question
 
-The constants (0.5 baseline, the cap, the multiplicative shape) are a
-reasonable v1, not a law of nature. Plan is to ship this, log the raw
+The constants (0.9 baseline, the 0.1 revision headroom, the multiplicative
+shape) are a reasonable v1, not a law of nature. Plan is to ship this, log the raw
 signals for real documents, and revisit weighting once we can see the
 score distribution against pieces we can eyeball as "clearly copy-pasted"
 vs. "clearly hand-written."
