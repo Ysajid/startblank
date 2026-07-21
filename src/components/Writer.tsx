@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useWritingStats } from "../lib/useWritingStats";
+import { computeBlankScore } from "../lib/blankScore";
 import { loadDraft, loadPrefs, savePrefs, saveDraft } from "../lib/storage";
 import type { FontName, ThemeName } from "../types";
 import { ThemeSwitch } from "./ThemeSwitch";
@@ -24,6 +25,7 @@ export function Writer() {
   const [theme, setTheme] = useState<ThemeName>("light");
   const [font, setFont] = useState<FontName>("serif");
   const [charCount, setCharCount] = useState(0);
+  const [liveScore, setLiveScore] = useState(0);
   const [publishOpen, setPublishOpen] = useState(false);
 
   useEffect(() => {
@@ -37,6 +39,7 @@ export function Writer() {
       textareaRef.current.value = draft.content;
       setCharCount(draft.content.length);
       reset(draft.stats);
+      setLiveScore(computeBlankScore(draft.stats, draft.content.length).score);
     }
   }, [reset]);
 
@@ -57,7 +60,9 @@ export function Writer() {
 
   function onInput(event: React.FormEvent<HTMLTextAreaElement>) {
     handleInput(event);
-    setCharCount(event.currentTarget.value.length);
+    const length = event.currentTarget.value.length;
+    setCharCount(length);
+    setLiveScore(computeBlankScore(statsRef.current, length).score);
     queueSave();
   }
 
@@ -66,6 +71,7 @@ export function Writer() {
     if (textareaRef.current) textareaRef.current.value = "";
     reset();
     setCharCount(0);
+    setLiveScore(0);
     saveDraft({ content: "", stats: statsRef.current });
     textareaRef.current?.focus();
   }
@@ -110,8 +116,13 @@ export function Writer() {
         />
       </main>
 
-      <footer className="fixed bottom-6 left-6 font-write-mono text-[11px] text-[var(--fg-muted)]">
-        {wordCount} {wordCount === 1 ? "word" : "words"} · {charCount} characters
+      <footer className="fixed inset-x-6 bottom-6 flex items-baseline justify-between font-write-mono text-[11px] text-[var(--fg-muted)]">
+        <span>
+          {wordCount} {wordCount === 1 ? "word" : "words"} · {charCount} characters
+        </span>
+        <span className="tabular-nums">
+          Blank score {charCount === 0 ? "—" : liveScore.toFixed(1)}
+        </span>
       </footer>
 
       <PublishPanel
