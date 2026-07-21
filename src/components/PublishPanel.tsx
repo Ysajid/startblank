@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { computeBlankScore } from "../lib/blankScore";
-import { buildShareUrl } from "../lib/share";
+import { buildShareUrl, linkedInShareUrl } from "../lib/share";
 import type { FontName, ThemeName, WritingStats } from "../types";
 import { ScoreMeter } from "./ScoreMeter";
 
@@ -139,14 +139,24 @@ export function PublishPanel({
             </div>
           </div>
 
-          <a
-            href={shareUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="font-write-mono text-[12px] text-[var(--accent)] underline underline-offset-4"
-          >
-            Open published page ↗
-          </a>
+          <div className="flex flex-col gap-3">
+            <a
+              href={shareUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-write-mono text-[12px] text-[var(--accent)] underline underline-offset-4"
+            >
+              Open published page ↗
+            </a>
+            <a
+              href={linkedInShareUrl(shareUrl)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-write-mono text-[12px] text-[var(--accent)] underline underline-offset-4"
+            >
+              Share on LinkedIn ↗
+            </a>
+          </div>
         </div>
       )}
     </div>

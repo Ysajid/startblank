@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { clearDraft } from "../lib/storage";
+import { linkedInShareUrl } from "../lib/share";
 import type { FontName, PublishedDocument } from "../types";
 import { ScoreMeter } from "./ScoreMeter";
+import { Wordmark } from "./Wordmark";
 
 const FONT_CLASS: Record<FontName, string> = {
   serif: "font-write-serif",
@@ -24,14 +26,25 @@ export function ReadOnly({ doc }: { doc: PublishedDocument }) {
   return (
     <div className="min-h-screen">
       <header className="flex items-center justify-between border-b border-[var(--rule)] px-6 py-4">
-        <span className="font-write-serif text-[15px] italic text-[var(--fg)]">startblank</span>
-        <a
-          href={window.location.pathname}
-          onClick={() => clearDraft()}
-          className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)] hover:text-[var(--fg)]"
-        >
-          Write your own
-        </a>
+        <Wordmark />
+        <div className="flex items-center gap-6">
+          <a
+            href={linkedInShareUrl(window.location.href)}
+            target="_blank"
+            rel="noreferrer"
+            className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)] hover:text-[var(--fg)]"
+          >
+            Share on LinkedIn
+          </a>
+          <div className="h-4 w-px bg-[var(--rule)]" />
+          <a
+            href={window.location.pathname}
+            onClick={() => clearDraft()}
+            className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)] hover:text-[var(--fg)]"
+          >
+            Write your own
+          </a>
+        </div>
       </header>
 
       <div className="mx-auto flex max-w-[720px] flex-col gap-6 border-b border-[var(--rule)] px-6 pb-8 pt-8 sm:flex-row sm:items-start sm:justify-between">

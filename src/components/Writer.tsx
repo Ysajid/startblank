@@ -6,6 +6,7 @@ import type { FontName, ThemeName } from "../types";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { FontSwitch } from "./FontSwitch";
 import { PublishPanel } from "./PublishPanel";
+import { Wordmark } from "./Wordmark";
 
 const FONT_CLASS: Record<FontName, string> = {
   serif: "font-write-serif",
@@ -81,7 +82,7 @@ export function Writer() {
   return (
     <div className="min-h-screen">
       <header className="flex items-center justify-between border-b border-[var(--rule)] px-6 py-4">
-        <span className="font-write-serif text-[15px] italic text-[var(--fg)]">startblank</span>
+        <Wordmark />
         <div className="flex items-center gap-6">
           <FontSwitch value={font} onChange={setFont} />
           <div className="h-4 w-px bg-[var(--rule)]" />

@@ -48,3 +48,7 @@ export function readShareHash(): PublishedDocument | null {
   if (!hash.startsWith(HASH_PREFIX)) return null;
   return decodeDocument(hash.slice(HASH_PREFIX.length));
 }
+
+export function linkedInShareUrl(pageUrl: string): string {
+  return `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(pageUrl)}`;
+}
