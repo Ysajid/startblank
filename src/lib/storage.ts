@@ -1,3 +1,4 @@
+import type { PasteRange } from "./provenance";
 import type { FontName, ThemeName, WritingStats } from "../types";
 
 const DRAFT_KEY = "startblank.draft";
@@ -6,6 +7,7 @@ const PREFS_KEY = "startblank.prefs";
 export interface Draft {
   content: string;
   stats: WritingStats;
+  pasteRanges: PasteRange[];
 }
 
 export interface Prefs {
@@ -17,7 +19,13 @@ export function loadDraft(): Draft | null {
   const raw = localStorage.getItem(DRAFT_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as Draft;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.content !== "string") return null;
+    return {
+      content: parsed.content,
+      stats: parsed.stats ?? { keystrokes: 0, edits: 0, pasteEvents: 0, pastedChars: 0 },
+      pasteRanges: Array.isArray(parsed.pasteRanges) ? parsed.pasteRanges : [],
+    };
   } catch {
     return null;
   }

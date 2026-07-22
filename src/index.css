@@ -10,6 +10,7 @@
   --rule: rgba(30, 33, 38, 0.14);
   --accent: #2b4a73;
   --accent-fg: #fbfaf6;
+  --paste-mark: rgba(43, 74, 115, 0.12);
 }
 
 :root[data-theme="dark"] {
@@ -20,6 +21,7 @@
   --rule: rgba(233, 230, 218, 0.14);
   --accent: #7da6ee;
   --accent-fg: #14171c;
+  --paste-mark: rgba(125, 166, 238, 0.2);
 }
 
 :root[data-theme="sepia"] {
@@ -30,6 +32,7 @@
   --rule: rgba(64, 48, 31, 0.18);
   --accent: #2f4d74;
   --accent-fg: #f1e7d2;
+  --paste-mark: rgba(47, 77, 116, 0.14);
 }
 
 html,

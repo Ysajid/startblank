@@ -53,6 +53,10 @@ export function ScoreMeter({ score, label }: { score: number; label?: string }) 
           <p className="mt-3 font-write-mono text-[11px] text-[var(--fg)]">
             Score = 100 × Organic × Kept × Revision
           </p>
+          <p className="mt-3">
+            Pasted text is marked subtly while you write — delete it and it
+            stops counting against you.
+          </p>
         </div>
       ) : null}
     </div>
