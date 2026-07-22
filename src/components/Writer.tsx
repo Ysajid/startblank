@@ -143,13 +143,23 @@ export function Writer() {
         </div>
       </main>
 
-      <footer className="fixed inset-x-6 bottom-6 flex items-baseline justify-between font-write-mono text-[11px] text-[var(--fg-muted)]">
-        <span>
-          {wordCount} {wordCount === 1 ? "word" : "words"} · {charCount} characters
-        </span>
-        <span className="tabular-nums">
-          Blank score {charCount === 0 ? "—" : liveScore.toFixed(1)}
-        </span>
+      <footer className="fixed inset-x-6 bottom-6 flex items-end justify-between">
+        <div>
+          <div className="font-write-mono text-2xl leading-none tabular-nums text-[var(--fg)]">
+            {charCount}
+          </div>
+          <div className="mt-1 font-write-mono text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">
+            characters · {wordCount} {wordCount === 1 ? "word" : "words"}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-write-mono text-2xl leading-none tabular-nums text-[var(--fg)]">
+            {charCount === 0 ? "—" : liveScore.toFixed(1)}
+          </div>
+          <div className="mt-1 font-write-mono text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">
+            blank score
+          </div>
+        </div>
       </footer>
 
       <PublishPanel

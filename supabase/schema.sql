@@ -48,3 +48,18 @@ as $$
 $$;
 
 grant execute on function public.get_document_by_slug(text) to anon;
+
+-- Total published count, for the "N published" line shown alongside the
+-- wordmark. Same reasoning as above: this exposes an aggregate number only,
+-- never a row, so it can't be used to enumerate or read any document.
+create or replace function public.get_published_count()
+returns bigint
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select count(*) from public.documents;
+$$;
+
+grant execute on function public.get_published_count() to anon;

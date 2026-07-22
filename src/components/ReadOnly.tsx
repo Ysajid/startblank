@@ -52,11 +52,14 @@ export function ReadOnly({ doc }: { doc: PublishedDocument }) {
           <ScoreMeter score={doc.score} label="Blank score" />
         </div>
         <div className="sm:order-1">
-          <p className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">
-            Published {publishedDate}
+          <div className="font-write-mono text-4xl tabular-nums text-[var(--fg)]">
+            {doc.finalLength}
+          </div>
+          <p className="mt-2 font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">
+            characters · {wordCount} {wordCount === 1 ? "word" : "words"}
           </p>
-          <p className="mt-1 font-write-mono text-[11px] text-[var(--fg-muted)]">
-            {wordCount} {wordCount === 1 ? "word" : "words"} · {doc.finalLength} characters
+          <p className="mt-3 font-write-mono text-[11px] text-[var(--fg-muted)]">
+            Published {publishedDate}
           </p>
         </div>
       </div>

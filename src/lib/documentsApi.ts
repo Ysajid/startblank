@@ -57,3 +57,11 @@ export async function fetchDocumentBySlug(slug: string): Promise<PublishedDocume
   if (error || !data || data.length === 0) return null;
   return fromRow(data[0] as DocumentRow);
 }
+
+export async function fetchPublishedCount(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("get_published_count");
+  if (error || data == null) return null;
+  // Postgres bigint can come back as either a JSON number or a numeric string.
+  const count = typeof data === "string" ? parseInt(data, 10) : data;
+  return typeof count === "number" && !Number.isNaN(count) ? count : null;
+}
