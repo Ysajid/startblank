@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useWritingStats } from "../lib/useWritingStats";
 import { computeBlankScore } from "../lib/blankScore";
-import { loadDraft, loadPrefs, savePrefs, saveDraft } from "../lib/storage";
+import { loadDraft, loadPrefs, resolveInitialTheme, savePrefs, saveDraft } from "../lib/storage";
 import type { FontName, ThemeName } from "../types";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { FontSwitch } from "./FontSwitch";
@@ -13,10 +13,6 @@ const FONT_CLASS: Record<FontName, string> = {
   sans: "font-write-sans",
   mono: "font-write-mono",
 };
-
-function prefersDark(): boolean {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-}
 
 export function Writer() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -31,10 +27,8 @@ export function Writer() {
   const [publishOpen, setPublishOpen] = useState(false);
 
   useEffect(() => {
-    const prefs = loadPrefs();
-    const hasSavedTheme = localStorage.getItem("startblank.prefs") !== null;
-    setTheme(hasSavedTheme ? prefs.theme : prefersDark() ? "dark" : "light");
-    setFont(prefs.font);
+    setTheme(resolveInitialTheme());
+    setFont(loadPrefs().font);
 
     const draft = loadDraft();
     if (draft && textareaRef.current) {

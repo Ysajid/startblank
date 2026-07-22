@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { computeBlankScore } from "../lib/blankScore";
 import { buildShareUrl, linkedInShareUrl } from "../lib/share";
+import { publishDocument } from "../lib/documentsApi";
 import type { FontName, ThemeName, WritingStats } from "../types";
 import { ScoreMeter } from "./ScoreMeter";
 
@@ -26,12 +27,15 @@ export function PublishPanel({
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setSnapshot(getSnapshot());
     setStage("review");
     setCopied(false);
+    setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -41,19 +45,26 @@ export function PublishPanel({
   const wordCount = snapshot.content.trim() === "" ? 0 : snapshot.content.trim().split(/\s+/).length;
   const breakdown = computeBlankScore(snapshot.stats, finalLength);
 
-  function confirmPublish() {
+  async function confirmPublish() {
     if (!snapshot) return;
-    const url = buildShareUrl({
-      content: snapshot.content,
-      theme,
-      font,
-      stats: snapshot.stats,
-      finalLength,
-      score: breakdown.score,
-      publishedAt: Date.now(),
-    });
-    setShareUrl(url);
-    setStage("done");
+    setPublishing(true);
+    setError(null);
+    try {
+      const slug = await publishDocument({
+        content: snapshot.content,
+        theme,
+        font,
+        stats: snapshot.stats,
+        finalLength,
+        score: breakdown.score,
+      });
+      setShareUrl(buildShareUrl(slug));
+      setStage("done");
+    } catch {
+      setError("Couldn't publish — check your connection and try again.");
+    } finally {
+      setPublishing(false);
+    }
   }
 
   async function copyLink() {
@@ -101,14 +112,17 @@ export function PublishPanel({
             link can view. It cannot be edited afterward.
           </p>
 
-          <button
-            type="button"
-            onClick={confirmPublish}
-            disabled={finalLength === 0}
-            className="self-start rounded-sm border border-[var(--fg)] px-4 py-2 font-write-mono text-[12px] uppercase tracking-wide text-[var(--fg)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Confirm &amp; get link
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={confirmPublish}
+              disabled={finalLength === 0 || publishing}
+              className="self-start rounded-sm border border-[var(--fg)] px-4 py-2 font-write-mono text-[12px] uppercase tracking-wide text-[var(--fg)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {publishing ? "Publishing…" : "Confirm & get link"}
+            </button>
+            {error ? <p className="text-[12px] text-[var(--fg-muted)]">{error}</p> : null}
+          </div>
         </div>
       ) : (
         <div className="mt-8 flex flex-col gap-6">

@@ -1,19 +1,47 @@
 import { useEffect, useState } from "react";
-import { readShareHash } from "./lib/share";
+import { readShareSlug } from "./lib/share";
+import { fetchDocumentBySlug } from "./lib/documentsApi";
 import type { PublishedDocument } from "./types";
 import { Writer } from "./components/Writer";
 import { ReadOnly } from "./components/ReadOnly";
+import { NotFound } from "./components/NotFound";
+
+type ViewState =
+  | { status: "writer" }
+  | { status: "loading" }
+  | { status: "shared"; doc: PublishedDocument }
+  | { status: "not-found" };
 
 export default function App() {
-  const [sharedDoc, setSharedDoc] = useState<PublishedDocument | null>(() => readShareHash());
+  const [view, setView] = useState<ViewState>(() =>
+    readShareSlug() ? { status: "loading" } : { status: "writer" }
+  );
 
   useEffect(() => {
-    function onHashChange() {
-      setSharedDoc(readShareHash());
+    let cancelled = false;
+
+    async function load() {
+      const slug = readShareSlug();
+      if (!slug) {
+        setView({ status: "writer" });
+        return;
+      }
+      setView({ status: "loading" });
+      const doc = await fetchDocumentBySlug(slug);
+      if (cancelled) return;
+      setView(doc ? { status: "shared", doc } : { status: "not-found" });
     }
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+
+    load();
+    window.addEventListener("hashchange", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("hashchange", load);
+    };
   }, []);
 
-  return sharedDoc ? <ReadOnly doc={sharedDoc} /> : <Writer />;
+  if (view.status === "loading") return null;
+  if (view.status === "shared") return <ReadOnly doc={view.doc} />;
+  if (view.status === "not-found") return <NotFound />;
+  return <Writer />;
 }

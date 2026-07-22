@@ -56,3 +56,13 @@ export function loadPrefs(): Prefs {
 export function savePrefs(prefs: Prefs): void {
   localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 }
+
+// A saved theme preference always wins; with none yet, follow the system
+// setting rather than hard-coding light — used for any screen that isn't
+// showing a specific published document (which carries its own theme).
+export function resolveInitialTheme(): ThemeName {
+  const hasSavedTheme = localStorage.getItem(PREFS_KEY) !== null;
+  if (hasSavedTheme) return loadPrefs().theme;
+  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  return prefersDark ? "dark" : "light";
+}
