@@ -1,6 +1,7 @@
 import type { FontName } from "../types";
 
 const FONTS: { value: FontName; label: string; className: string }[] = [
+  { value: "typewriter", label: "Typewriter", className: "font-write-typewriter" },
   { value: "serif", label: "Serif", className: "font-write-serif" },
   { value: "sans", label: "Sans", className: "font-write-sans" },
   { value: "mono", label: "Mono", className: "font-write-mono" },

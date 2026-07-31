@@ -41,15 +41,15 @@ export function clearDraft(): void {
 
 export function loadPrefs(): Prefs {
   const raw = localStorage.getItem(PREFS_KEY);
-  if (!raw) return { theme: "light", font: "serif" };
+  if (!raw) return { theme: "light", font: "typewriter" };
   try {
     const parsed = JSON.parse(raw);
     return {
       theme: parsed.theme ?? "light",
-      font: parsed.font ?? "serif",
+      font: parsed.font ?? "typewriter",
     };
   } catch {
-    return { theme: "light", font: "serif" };
+    return { theme: "light", font: "typewriter" };
   }
 }
 

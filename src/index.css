@@ -8,20 +8,20 @@
   --fg: #1e2126;
   --fg-muted: #63666d;
   --rule: rgba(30, 33, 38, 0.14);
-  --accent: #2b4a73;
+  --accent: #1f7a3d;
   --accent-fg: #fbfaf6;
-  --paste-mark: rgba(43, 74, 115, 0.12);
+  --paste-mark: rgba(31, 122, 61, 0.12);
 }
 
 :root[data-theme="dark"] {
-  --bg: #14171c;
-  --surface: #1b1f26;
-  --fg: #e9e6da;
-  --fg-muted: #8d9199;
-  --rule: rgba(233, 230, 218, 0.14);
-  --accent: #7da6ee;
-  --accent-fg: #14171c;
-  --paste-mark: rgba(125, 166, 238, 0.2);
+  --bg: #0a0a0a;
+  --surface: #161616;
+  --fg: #e8e6e1;
+  --fg-muted: #9a9a9f;
+  --rule: rgba(232, 230, 225, 0.14);
+  --accent: #30d158;
+  --accent-fg: #0a0a0a;
+  --paste-mark: rgba(48, 209, 88, 0.18);
 }
 
 :root[data-theme="sepia"] {
@@ -30,9 +30,9 @@
   --fg: #40301f;
   --fg-muted: #8a7458;
   --rule: rgba(64, 48, 31, 0.18);
-  --accent: #2f4d74;
+  --accent: #2e6b39;
   --accent-fg: #f1e7d2;
-  --paste-mark: rgba(47, 77, 116, 0.14);
+  --paste-mark: rgba(46, 107, 57, 0.14);
 }
 
 html,

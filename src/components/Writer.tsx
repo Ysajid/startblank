@@ -9,6 +9,7 @@ import { PublishPanel } from "./PublishPanel";
 import { Wordmark } from "./Wordmark";
 
 const FONT_CLASS: Record<FontName, string> = {
+  typewriter: "font-write-typewriter",
   serif: "font-write-serif",
   sans: "font-write-sans",
   mono: "font-write-mono",
@@ -21,7 +22,7 @@ export function Writer() {
   const saveTimer = useRef<number | undefined>(undefined);
 
   const [theme, setTheme] = useState<ThemeName>("light");
-  const [font, setFont] = useState<FontName>("serif");
+  const [font, setFont] = useState<FontName>("typewriter");
   const [content, setContent] = useState("");
   const [liveScore, setLiveScore] = useState(0);
   const [publishOpen, setPublishOpen] = useState(false);

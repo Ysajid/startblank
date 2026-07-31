@@ -8,6 +8,7 @@ export default {
         "write-serif": ["Iowan Old Style", "Palatino Linotype", "Book Antiqua", "Georgia", "serif"],
         "write-sans": ["Charter", "Avenir Next", "-apple-system", "Segoe UI", "sans-serif"],
         "write-mono": ["ui-monospace", "SF Mono", "Menlo", "Consolas", "monospace"],
+        "write-typewriter": ["Courier Prime", "Courier New", "Courier", "monospace"],
       },
     },
   },

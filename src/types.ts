@@ -1,5 +1,5 @@
 export type ThemeName = "light" | "dark" | "sepia";
-export type FontName = "serif" | "sans" | "mono";
+export type FontName = "typewriter" | "serif" | "sans" | "mono";
 
 export interface WritingStats {
   keystrokes: number;
