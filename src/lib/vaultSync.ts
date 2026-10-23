@@ -11,10 +11,14 @@ import {
   removeFiles,
   writeFile,
 } from "./vaultStorage";
+import { requestIndex } from "./searchApi";
 
 export interface Note extends NoteContent {
   path: string;
   dirty: boolean;
+  // Notes are listed up front but downloaded only when opened; until then
+  // body/stats are empty placeholders.
+  loaded: boolean;
 }
 
 export type SyncStatus = "loading" | "synced" | "saving" | "offline" | "error";
@@ -39,6 +43,7 @@ interface Entry extends NoteContent {
   recordBase: string | null;
   recordEtag: string | null;
   dirty: boolean;
+  loaded: boolean;
   timer?: number;
 }
 
@@ -60,6 +65,34 @@ export function baseName(path: string): string {
 
 export function noteTitle(path: string): string {
   return baseName(path).replace(/\.md$/i, "");
+}
+
+function emptyStats(): WritingStats {
+  return { keystrokes: 0, edits: 0, pasteEvents: 0, pastedChars: 0 };
+}
+
+// A note known from the vault listing whose file hasn't been downloaded.
+function stub(etag: string, recordEtag: string | null): Entry {
+  return {
+    body: "",
+    stats: emptyStats(),
+    pasteRanges: [],
+    base: null,
+    etag,
+    recordBase: null,
+    recordEtag,
+    dirty: false,
+    loaded: false,
+  };
+}
+
+// Whether the note file exists on the server (as far as we know).
+function onServer(entry: Entry): boolean {
+  return entry.base !== null || entry.etag !== null;
+}
+
+function hasRecord(entry: Entry): boolean {
+  return entry.recordBase !== null || entry.recordEtag !== null;
 }
 
 // Dot-folders (.startblank, .obsidian, …) hold app data, not notes.
@@ -102,6 +135,7 @@ export class VaultSync {
   private listeners = new Set<() => void>();
   private snapshot: VaultSnapshot;
   private loading: Promise<void> | null = null;
+  private opening = new Map<string, Promise<void>>();
   private stopped = false;
 
   constructor(private userId: string) {
@@ -125,7 +159,7 @@ export class VaultSync {
   private buildSnapshot(): VaultSnapshot {
     const notes: Record<string, Note> = {};
     for (const [path, e] of this.entries) {
-      notes[path] = { path, body: e.body, stats: e.stats, pasteRanges: e.pasteRanges, dirty: e.dirty };
+      notes[path] = { path, body: e.body, stats: e.stats, pasteRanges: e.pasteRanges, dirty: e.dirty, loaded: e.loaded };
     }
     const folders = new Set(this.folders);
     for (const path of this.entries.keys()) {
@@ -194,7 +228,15 @@ export class VaultSync {
     recordEtag: string | null
   ): Entry {
     const { content, migrate } = loadNote(text, recordText);
-    const entry: Entry = { ...content, base: text, etag, recordBase: recordText, recordEtag, dirty: migrate };
+    const entry: Entry = {
+      ...content,
+      base: text,
+      etag,
+      recordBase: recordText,
+      recordEtag,
+      dirty: migrate,
+      loaded: true,
+    };
     if (migrate) queueMicrotask(() => this.scheduleSave(path, 0));
     return entry;
   }
@@ -225,18 +267,31 @@ export class VaultSync {
       else if (!isHidden(file.path) && file.path.toLowerCase().endsWith(NOTE_EXT)) remote.set(file.path, file.etag);
     }
 
-    const changed = [...remote].filter(([path, etag]) => {
-      const entry = this.entries.get(path);
-      return !entry || entry.etag !== etag || entry.recordEtag !== (records.get(path) ?? null);
-    });
-    const downloads = await mapLimit(changed, DOWNLOAD_CONCURRENCY, async ([path, etag]) => {
+    // New and unopened notes only need their etags; just the notes that are
+    // open (downloaded) are re-fetched when they change.
+    for (const [path, etag] of remote) {
       const entry = this.entries.get(path);
       const recordEtag = records.get(path) ?? null;
+      if (!entry) {
+        this.entries.set(path, stub(etag, recordEtag));
+      } else if (!entry.loaded) {
+        entry.etag = etag;
+        entry.recordEtag = recordEtag;
+      }
+    }
+
+    const changed = [...remote].filter(([path, etag]) => {
+      const entry = this.entries.get(path)!;
+      return entry.loaded && (entry.etag !== etag || entry.recordEtag !== (records.get(path) ?? null));
+    });
+    const downloads = await mapLimit(changed, DOWNLOAD_CONCURRENCY, async ([path, etag]) => {
+      const entry = this.entries.get(path)!;
+      const recordEtag = records.get(path) ?? null;
       const [text, recordText] = await Promise.all([
-        !entry || entry.etag !== etag ? readFile(this.userId, path) : entry.base!,
+        entry.etag !== etag ? readFile(this.userId, path) : entry.base!,
         recordEtag === null
           ? null
-          : !entry || entry.recordEtag !== recordEtag
+          : entry.recordEtag !== recordEtag
             ? readFile(this.userId, recordPath(path))
             : entry.recordBase,
       ]);
@@ -245,11 +300,7 @@ export class VaultSync {
 
     changed.forEach(([path, etag], i) => {
       const { text, recordText, recordEtag } = downloads[i];
-      const entry = this.entries.get(path);
-      if (!entry) {
-        this.entries.set(path, this.build(path, text, etag, recordText, recordEtag));
-        return;
-      }
+      const entry = this.entries.get(path)!;
       const noteChanged = text !== entry.base;
       if (!noteChanged && recordText === entry.recordBase) {
         // our own save, now with its etags
@@ -268,7 +319,7 @@ export class VaultSync {
     });
 
     for (const [path, entry] of [...this.entries]) {
-      if (remote.has(path) || entry.base === null) continue;
+      if (remote.has(path) || !onServer(entry)) continue;
       if (entry.dirty) {
         // Deleted elsewhere while being edited here: the edits win, so
         // treat it as a brand-new file on the next save.
@@ -305,6 +356,7 @@ export class VaultSync {
       recordBase: null,
       recordEtag: null,
       dirty: true,
+      loaded: true,
     });
     this.replaceFromServer(path, remoteText, etag, recordText, recordEtag);
     this.scheduleSave(copyPath, 0);
@@ -318,6 +370,26 @@ export class VaultSync {
       const candidate = `${stem} ${n}${NOTE_EXT}`;
       if (!this.entries.has(candidate)) return candidate;
     }
+  }
+
+  // Downloads a listed note (and its record) the first time it's opened.
+  ensureLoaded(path: string): Promise<void> {
+    const entry = this.entries.get(path);
+    if (!entry || entry.loaded) return Promise.resolve();
+    let pending = this.opening.get(path);
+    if (!pending) {
+      pending = this.enqueue(async () => {
+        const current = this.entries.get(path);
+        if (!current || current.loaded) return;
+        const [text, recordText] = await Promise.all([
+          readFile(this.userId, path),
+          current.recordEtag === null ? null : readFile(this.userId, recordPath(path)).catch(() => null),
+        ]);
+        this.entries.set(path, this.build(path, text, current.etag, recordText, current.recordEtag));
+      }).finally(() => this.opening.delete(path));
+      this.opening.set(path, pending);
+    }
+    return pending;
   }
 
   dismissNotice() {
@@ -366,6 +438,7 @@ export class VaultSync {
       await writeFile(this.userId, path, body);
       entry.base = body;
       entry.etag = await remoteEtag(this.userId, path);
+      requestIndex("upsert", [path]);
     }
     // Typing that happened while the upload was in flight still needs saving.
     entry.dirty = serializeRecord(entry) !== record;
@@ -410,13 +483,14 @@ export class VaultSync {
     const target = this.uniquePath(path);
     this.entries.set(target, {
       body: content?.body ?? "",
-      stats: content?.stats ?? { keystrokes: 0, edits: 0, pasteEvents: 0, pastedChars: 0 },
+      stats: content?.stats ?? emptyStats(),
       pasteRanges: content?.pasteRanges ?? [],
       base: null,
       etag: null,
       recordBase: null,
       recordEtag: null,
       dirty: true,
+      loaded: true,
     });
     this.scheduleSave(target, 0);
     this.emit();
@@ -438,10 +512,14 @@ export class VaultSync {
   private async moveOne(from: string, to: string) {
     const entry = this.entries.get(from);
     if (!entry) return;
-    if (entry.dirty && entry.base !== null) await this.flush(from);
+    if (entry.dirty && onServer(entry)) await this.flush(from);
     window.clearTimeout(entry.timer);
-    if (entry.recordBase !== null) await moveFile(this.userId, recordPath(from), recordPath(to));
-    if (entry.base !== null) await moveFile(this.userId, from, to);
+    if (hasRecord(entry)) await moveFile(this.userId, recordPath(from), recordPath(to));
+    if (onServer(entry)) {
+      await moveFile(this.userId, from, to);
+      requestIndex("delete", [from]);
+      requestIndex("upsert", [to]);
+    }
     this.entries.delete(from);
     this.entries.set(to, entry);
     if (entry.dirty) this.scheduleSave(to, 0);
@@ -453,6 +531,7 @@ export class VaultSync {
       if (!entry) return;
       window.clearTimeout(entry.timer);
       await removeFiles(this.userId, this.filesOf(path));
+      requestIndex("delete", [path]);
       this.entries.delete(path);
     });
   }
@@ -460,10 +539,7 @@ export class VaultSync {
   // The server files that make up a note: the Markdown and its record.
   private filesOf(path: string): string[] {
     const entry = this.entries.get(path)!;
-    return [
-      ...(entry.base !== null ? [path] : []),
-      ...(entry.recordBase !== null ? [recordPath(path)] : []),
-    ];
+    return [...(onServer(entry) ? [path] : []), ...(hasRecord(entry) ? [recordPath(path)] : [])];
   }
 
   createFolder(path: string) {
@@ -497,6 +573,7 @@ export class VaultSync {
         .filter((f) => f === path || isUnder(f, path))
         .map((f) => `${f}/${FOLDER_MARKER}`);
       await removeFiles(this.userId, [...notes.flatMap((p) => this.filesOf(p)), ...markers]);
+      requestIndex("delete", notes);
       for (const p of notes) {
         window.clearTimeout(this.entries.get(p)!.timer);
         this.entries.delete(p);

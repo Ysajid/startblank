@@ -2,10 +2,15 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 
 const server = new Map<string, { text: string; etag: string }>();
 let n = 0;
+let downloads = 0;
+const indexed: string[] = [];
+vi.mock("../searchApi", () => ({
+  requestIndex: (op: string, paths: string[]) => paths.forEach((p) => indexed.push(`${op}:${p}`)),
+}));
 vi.mock("../vaultStorage", () => ({
   FOLDER_MARKER: ".keep",
   listVault: async (uid: string) => [...server].filter(([k]) => k.startsWith(uid + "/")).map(([k, v]) => ({ path: k.slice(uid.length + 1), etag: v.etag })),
-  readFile: async (uid: string, p: string) => { const f = server.get(`${uid}/${p}`); if (!f) throw new Error("404 " + p); return f.text; },
+  readFile: async (uid: string, p: string) => { downloads++; const f = server.get(`${uid}/${p}`); if (!f) throw new Error("404 " + p); return f.text; },
   remoteEtag: async (uid: string, p: string) => server.get(`${uid}/${p}`)?.etag ?? null,
   writeFile: async (uid: string, p: string, text: string) => { server.set(`${uid}/${p}`, { text, etag: `e${++n}` }); },
   moveFile: async (uid: string, a: string, b: string) => { const f = server.get(`${uid}/${a}`)!; server.delete(`${uid}/${a}`); server.set(`${uid}/${b}`, f); },
@@ -52,19 +57,20 @@ describe("agents and provenance", async () => {
     expect(score).toBeLessThan(40);
     expect(a.hasUnsavedChanges()).toBe(false); // nothing written back on load
 
-    const c = new VaultSync("u1"); await c.start();
+    const c = new VaultSync("u1"); await c.start(); await c.ensureLoaded(p);
     expect(c.getSnapshot().notes[p].pasteRanges).toEqual(note.pasteRanges);
 
     // user types over the agent's sentence -> record catches up, file stays clean
     a.updateNote(p, "hello world\nmy own words\n", { ...note.stats, keystrokes: 25, edits: 3, pastedChars: 0 }, []);
     await a.flushNow();
     expect(server.get("u1/Journal.md")!.text).toBe("hello world\nmy own words\n");
-    const d = new VaultSync("u1"); await d.start();
+    const d = new VaultSync("u1"); await d.start(); await d.ensureLoaded(p);
     expect(d.getSnapshot().notes[p].pasteRanges).toEqual([]);
 
     // agent-created note: all external
     agentWrite("Inbox/From agent.md", "# Summary\nstuff\n");
     await a.refresh();
+    await a.ensureLoaded("Inbox/From agent.md");
     expect(a.getSnapshot().notes["Inbox/From agent.md"].pasteRanges).toEqual([{ start: 0, length: 16 }]);
 
     // agent edits while user has unsaved edits -> conflict copy, nothing lost
@@ -86,7 +92,7 @@ describe("agents and provenance", async () => {
   it("migrates v1 notes to clean markdown", async () => {
     server.clear();
     agentWrite("Old.md", '---\nstartblank: {"v":1,"keystrokes":5,"edits":0,"pasteEvents":0,"pastedChars":0,"pasted":[]}\n---\nhello');
-    const a = new VaultSync("u1"); await a.start(); await tick(); await a.flushNow();
+    const a = new VaultSync("u1"); await a.start(); await a.ensureLoaded("Old.md"); await tick(); await a.flushNow();
     expect(server.get("u1/Old.md")!.text).toBe("hello");
     expect(a.getSnapshot().notes["Old.md"].stats.keystrokes).toBe(5);
     expect(a.getSnapshot().notes["Old.md"].pasteRanges).toEqual([]);

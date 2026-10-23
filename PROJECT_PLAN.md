@@ -33,18 +33,30 @@ it was written by hand, and pasted text stays visibly marked.
   `[[Folder/Note]]`), linked mentions (backlinks), quick switcher
   (Ctrl/Cmd+O, creates on miss), full-text search, and a rendered
   reading view (Ctrl/Cmd+E).
-- **Sync model.** The client keeps the vault in memory, saves each note
-  ~0.8s after typing stops (record first, then the note), and pulls
-  changes on focus and every 30s. Before every save it checks the note's
-  etag; if anything else changed the file meanwhile, nothing is
+- **Sync model.** Signing in fetches only the vault's file list (one
+  query, `list_vault_files()`); a note is downloaded the first time it is
+  opened. Open notes save ~0.8s after typing stops (record first, then the
+  note). The list is re-checked on focus and every 30s, and only open notes
+  are re-downloaded when they change. Before every save the note's etag is
+  checked; if anything else changed the file meanwhile, nothing is
   overwritten — the server's version keeps the name and the local one is
   saved as `Name (conflict <date>).md`.
-- **Setup:** run `supabase/schema.sql`, then `supabase/vaults.sql`.
+- **Search and backlinks run on the server.** `note_index` is a derived,
+  disposable index — searchable words (a tsvector, not the text), title,
+  `[[link]]` targets and a short excerpt — built from the files by the
+  `index-note` Edge Function. The app asks it to reindex each note it
+  saves, moves or deletes; an optional trigger on `storage.objects` also
+  catches files written by anything else (agents, scripts). Search is
+  multilingual ('simple' config, prefix matching); "Rebuild search index"
+  regenerates a user's index from their files.
+- **Setup:** run `supabase/schema.sql`, `supabase/vaults.sql`, then
+  `supabase/search.sql`; deploy the indexer with
+  `supabase functions deploy index-note --no-verify-jwt`.
 
 Not yet: an access layer for agents (e.g. an MCP server over the vault
-with per-user tokens), offline-first local cache (IndexedDB), rewriting links when a
-note is renamed, attachments/images, settings synced through the vault,
-realtime push instead of polling.
+with per-user tokens), an on-device cache of opened notes (IndexedDB),
+realtime change push instead of the 30s list check, rewriting links when a
+note is renamed, attachments/images, settings synced through the vault.
 
 The sections below are the original v1 plan; §3's "no accounts" and §6's
 "no user accounts" are superseded by the above.

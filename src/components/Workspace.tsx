@@ -4,7 +4,8 @@ import { supabase } from "../lib/supabase";
 import { computeBlankScore } from "../lib/blankScore";
 import { clearDraft, loadDraft, loadPrefs, resolveInitialTheme, savePrefs } from "../lib/storage";
 import { NOTE_EXT, noteTitle, parentOf, useVault, type SyncStatus } from "../lib/vaultSync";
-import { backlinksTo, renderMarkdown, resolveLink } from "../lib/wikilinks";
+import { renderMarkdown, resolveLink } from "../lib/wikilinks";
+import { fetchBacklinks, rebuildIndex, searchNotes, type SearchHit } from "../lib/searchApi";
 import type { FontName, ThemeName } from "../types";
 import { FileTree } from "./FileTree";
 import { FontSwitch } from "./FontSwitch";
@@ -58,7 +59,9 @@ export function Workspace({ session }: { session: Session }) {
   const importedDraft = useRef(false);
 
   const paths = useMemo(() => Object.keys(notes), [notes]);
-  const note = selected ? notes[selected] : undefined;
+  const listed = selected ? notes[selected] : undefined;
+  // Only an opened (downloaded) note can be shown or edited.
+  const note = listed?.loaded ? listed : undefined;
   const loaded = status !== "loading";
 
   useEffect(() => {
@@ -192,20 +195,74 @@ export function Workspace({ session }: { session: Session }) {
     await supabase.auth.signOut();
   }
 
+  // Searching runs on the server; notes with edits it hasn't indexed yet
+  // are matched locally and listed first.
+  const [serverHits, setServerHits] = useState<SearchHit[] | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setServerHits(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchNotes(q)
+        .then((hits) => !cancelled && setServerHits(hits))
+        .catch(() => !cancelled && setServerHits([]));
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return null;
-    return Object.values(notes)
-      .filter((n) => noteTitle(n.path).toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-      .map((n) => n.path)
-      .sort((a, b) => noteTitle(a).localeCompare(noteTitle(b)));
-  }, [notes, query]);
+    const local: SearchHit[] = Object.values(notes)
+      .filter((n) => n.dirty && (noteTitle(n.path).toLowerCase().includes(q) || n.body.toLowerCase().includes(q)))
+      .map((n) => ({ path: n.path, title: noteTitle(n.path), excerpt: n.body.slice(0, 160) }));
+    const seen = new Set(local.map((h) => h.path));
+    const remote = (serverHits ?? []).filter((h) => notes[h.path] && !seen.has(h.path));
+    return [...local, ...remote];
+  }, [notes, query, serverHits]);
+
+  const [backlinks, setBacklinks] = useState<string[]>([]);
+  const [backlinkTick, setBacklinkTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setBacklinkTick((t) => t + 1);
+    window.addEventListener("focus", bump);
+    return () => window.removeEventListener("focus", bump);
+  }, []);
+  useEffect(() => {
+    setBacklinks([]);
+    if (!selected) return;
+    let cancelled = false;
+    fetchBacklinks(selected)
+      .then((paths) => !cancelled && setBacklinks(paths))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, backlinkTick]);
+
+  useEffect(() => {
+    if (selected && listed && !listed.loaded) {
+      vault.ensureLoaded(selected).catch(() => setError("Couldn't open that note — check your connection."));
+    }
+  }, [vault, selected, listed]);
+
+  async function rebuildSearch() {
+    setError(null);
+    try {
+      const count = await rebuildIndex();
+      setError(`Search index rebuilt from ${count} ${count === 1 ? "note" : "notes"}.`);
+    } catch {
+      setError("Couldn't rebuild the search index — is the index-note function deployed?");
+    }
+  }
 
   const dirty = useMemo(() => new Set(Object.values(notes).filter((n) => n.dirty).map((n) => n.path)), [notes]);
-  const backlinks = useMemo(
-    () => (selected && note ? backlinksTo(selected, Object.values(notes)) : []),
-    [selected, note, notes]
-  );
   const previewHtml = useMemo(
     () => (reading && note ? renderMarkdown(note.body, paths) : ""),
     [reading, note, paths]
@@ -301,19 +358,28 @@ export function Workspace({ session }: { session: Session }) {
               ) : searchResults ? (
                 <ul className="py-2">
                   {searchResults.length === 0 ? (
-                    <li className="px-4 py-2 text-[13px] text-[var(--fg-muted)]">No matches.</li>
+                    <li className="px-4 py-2 text-[13px] text-[var(--fg-muted)]">
+                      {serverHits === null ? "Searching…" : "No matches."}
+                    </li>
                   ) : (
-                    searchResults.map((path) => (
-                      <li key={path}>
+                    searchResults.map((hit) => (
+                      <li key={hit.path}>
                         <button
                           type="button"
-                          onClick={() => open(path)}
-                          className="flex w-full flex-col px-4 py-1.5 text-left"
+                          onClick={() => open(hit.path)}
+                          className="flex w-full flex-col gap-0.5 px-4 py-2 text-left"
                         >
-                          <span className="truncate text-[13px] text-[var(--fg)]">{noteTitle(path)}</span>
-                          <span className="truncate font-write-mono text-[10px] text-[var(--fg-muted)]">
-                            {parentOf(path)}
-                          </span>
+                          <span className="truncate text-[13px] text-[var(--fg)]">{hit.title}</span>
+                          {parentOf(hit.path) ? (
+                            <span className="truncate font-write-mono text-[10px] text-[var(--fg-muted)]">
+                              {parentOf(hit.path)}
+                            </span>
+                          ) : null}
+                          {hit.excerpt ? (
+                            <span className="line-clamp-2 text-[12px] leading-snug text-[var(--fg-muted)]">
+                              {hit.excerpt}
+                            </span>
+                          ) : null}
                         </button>
                       </li>
                     ))
@@ -329,9 +395,14 @@ export function Workspace({ session }: { session: Session }) {
                 />
               )}
             </nav>
-            <div className="flex flex-col gap-3 border-t border-[var(--rule)] p-3 lg:hidden">
-              <FontSwitch value={font} onChange={setFont} />
-              <ThemeSwitch value={theme} onChange={setTheme} />
+            <div className="flex flex-col gap-3 border-t border-[var(--rule)] p-3">
+              <div className="flex flex-col gap-3 lg:hidden">
+                <FontSwitch value={font} onChange={setFont} />
+                <ThemeSwitch value={theme} onChange={setTheme} />
+              </div>
+              <button type="button" className={`${headerButton} self-start`} onClick={rebuildSearch}>
+                Rebuild search index
+              </button>
             </div>
           </aside>
         ) : null}
@@ -422,6 +493,10 @@ export function Workspace({ session }: { session: Session }) {
                 </div>
               </footer>
             </div>
+          ) : listed ? (
+            <p className="mx-auto max-w-[720px] px-6 pt-10 font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">
+              Opening {noteTitle(listed.path)}…
+            </p>
           ) : (
             <div className="mx-auto flex max-w-[420px] flex-col items-start gap-4 px-6 pt-24">
               <p className="font-write-typewriter text-xl text-[var(--fg)]">

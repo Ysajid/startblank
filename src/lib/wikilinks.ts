@@ -27,14 +27,6 @@ export function resolveLink(target: string, paths: string[]): string | null {
   return paths.find((p) => noteTitle(p).toLowerCase() === wanted) ?? null;
 }
 
-export function backlinksTo(path: string, notes: { path: string; body: string }[]): string[] {
-  const paths = notes.map((n) => n.path);
-  return notes
-    .filter((n) => n.path !== path && linkTargets(n.body).some((t) => resolveLink(t, paths) === path))
-    .map((n) => n.path)
-    .sort((a, b) => noteTitle(a).localeCompare(noteTitle(b)));
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")

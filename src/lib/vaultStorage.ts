@@ -59,28 +59,14 @@ function normalizeEtag(etag: string | undefined | null): string {
   return (etag ?? "").replace(/^W\//, "").replace(/"/g, "");
 }
 
-const PAGE = 1000;
-
-// Storage's list() is one level deep, so walk the tree folder by folder.
+// One query for the whole vault (see list_vault_files() in
+// supabase/search.sql), instead of walking it folder by folder.
 export async function listVault(userId: string): Promise<RemoteFile[]> {
-  const files: RemoteFile[] = [];
-  const queue = [userId];
-  while (queue.length > 0) {
-    const prefix = queue.shift()!;
-    for (let offset = 0; ; offset += PAGE) {
-      const { data, error } = await supabase.storage
-        .from(BUCKET)
-        .list(prefix, { limit: PAGE, offset, sortBy: { column: "name", order: "asc" } });
-      if (error) throw error;
-      for (const entry of data) {
-        const key = `${prefix}/${entry.name}`;
-        if (entry.id === null) queue.push(key);
-        else files.push({ path: fromKey(userId, key), etag: normalizeEtag(entry.metadata?.eTag) });
-      }
-      if (data.length < PAGE) break;
-    }
-  }
-  return files;
+  const { data, error } = await supabase.rpc("list_vault_files");
+  if (error) throw error;
+  return (data as { name: string; etag: string }[])
+    .filter((row) => row.name.startsWith(`${userId}/`))
+    .map((row) => ({ path: fromKey(userId, row.name), etag: normalizeEtag(row.etag) }));
 }
 
 export async function readFile(userId: string, path: string): Promise<string> {
