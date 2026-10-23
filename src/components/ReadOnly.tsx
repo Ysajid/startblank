@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { clearDraft } from "../lib/storage";
 import { linkedInShareUrl } from "../lib/share";
 import type { FontName, PublishedDocument } from "../types";
 import { ScoreMeter } from "./ScoreMeter";
@@ -40,7 +39,6 @@ export function ReadOnly({ doc }: { doc: PublishedDocument }) {
           <div className="h-4 w-px bg-[var(--rule)]" />
           <a
             href={window.location.pathname}
-            onClick={() => clearDraft()}
             className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)] hover:text-[var(--fg)]"
           >
             Write your own

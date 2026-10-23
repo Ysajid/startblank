@@ -1,5 +1,40 @@
 # Startblank — Project Plan
 
+## 0. Direction (v2): a hand-written vault
+
+Startblank is now a note-taking app in the spirit of Obsidian — a vault of
+linked Markdown notes — with the original idea kept at its core: **it
+takes a human to think**. Every note keeps an honest record of how much of
+it was written by hand, and pasted text stays visibly marked.
+
+- **Accounts, synced vaults.** Sign in (Supabase Auth, email + password) and
+  the same vault is on every device.
+- **Notes are files, not rows.** Each note is a plain `.md` file in a
+  private Supabase Storage bucket at `vaults/<user id>/<path>.md`. Folders
+  are real path prefixes (an empty one holds a `.keep` marker). The
+  database is only used for published snapshots (§4.4).
+- **The record travels with the file.** The Blank Score counts and the
+  pasted ranges live in one `startblank:` frontmatter line of the note
+  itself, so the score follows the note to any device. A file written
+  elsewhere (no record) counts as pasted until it is written over.
+- **Obsidian basics:** folder tree, `[[wikilinks]]` (incl. `[[Note|alias]]`,
+  `[[Folder/Note]]`), linked mentions (backlinks), quick switcher
+  (Ctrl/Cmd+O, creates on miss), full-text search, and a rendered
+  reading view (Ctrl/Cmd+E).
+- **Sync model.** The client keeps the vault in memory, saves each note
+  ~0.8s after typing stops, and pulls changes on focus and every 30s.
+  Before every save it checks the file's etag; if another device changed
+  the file meanwhile, nothing is overwritten — the server's version keeps
+  the name and the local one is saved as `Name (conflict <date>).md`.
+- **Setup:** run `supabase/schema.sql`, then `supabase/vaults.sql`.
+
+Not yet: offline-first local cache (IndexedDB), rewriting links when a
+note is renamed, attachments/images, settings synced through the vault,
+realtime push instead of polling.
+
+The sections below are the original v1 plan; §3's "no accounts" and §6's
+"no user accounts" are superseded by the above.
+
 ## 1. Vision
 
 A distraction-free writing tool: one blank page, nothing else. You write, you
