@@ -55,7 +55,9 @@ export function ScoreMeter({ score, label }: { score: number; label?: string }) 
           </p>
           <p className="mt-3">
             Pasted text is marked subtly while you write — delete it and it
-            stops counting against you.
+            stops counting against you. Text added outside startblank — by an
+            agent, an AI tool or another editor — is marked and counted the
+            same way.
           </p>
         </div>
       ) : null}

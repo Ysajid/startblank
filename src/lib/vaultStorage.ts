@@ -103,12 +103,17 @@ export async function remoteEtag(userId: string, path: string): Promise<string |
   throw error;
 }
 
-export async function writeFile(userId: string, path: string, text: string): Promise<void> {
+export async function writeFile(
+  userId: string,
+  path: string,
+  text: string,
+  contentType = "text/markdown"
+): Promise<void> {
   const { error } = await supabase.storage.from(BUCKET).upload(toKey(userId, path), text, {
     upsert: true,
     // Never let a CDN or browser cache hand another device a stale copy.
     cacheControl: "0",
-    contentType: "text/markdown; charset=utf-8",
+    contentType: `${contentType}; charset=utf-8`,
   });
   if (error) throw error;
 }

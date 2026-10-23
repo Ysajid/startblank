@@ -13,22 +13,36 @@ it was written by hand, and pasted text stays visibly marked.
   private Supabase Storage bucket at `vaults/<user id>/<path>.md`. Folders
   are real path prefixes (an empty one holds a `.keep` marker). The
   database is only used for published snapshots (§4.4).
-- **The record travels with the file.** The Blank Score counts and the
-  pasted ranges live in one `startblank:` frontmatter line of the note
-  itself, so the score follows the note to any device. A file written
-  elsewhere (no record) counts as pasted until it is written over.
+- **Files are for agents too.** The point of storing notes as files is
+  that they can be run through agents, AI services and personal-knowledge
+  tooling. So a note file is pure Markdown — nothing app-specific inside.
+- **The record lives beside the file.** The Blank Score counts and the
+  ranges not written by hand live in a sidecar,
+  `.startblank/record/<note path>.json`, along with a copy of the note as
+  the app last saved it. Dot-folders are app data and never shown as notes.
+- **Outside edits are attributed, not trusted.** When a note's file no
+  longer matches the copy in its record, something else wrote to it (an
+  agent, an AI service, another editor). The app diffs the two — by line,
+  then by word — and marks exactly the inserted text as not written here,
+  the same way pasted text is marked; removed text drops out of the
+  counts. This is deterministic, so every device reaches the same result
+  without writing anything back, and an agent can't raise a note's score
+  by editing it. A note with no record at all counts as written elsewhere.
+  An outside edit to a note with unsaved changes produces a conflict copy.
 - **Obsidian basics:** folder tree, `[[wikilinks]]` (incl. `[[Note|alias]]`,
   `[[Folder/Note]]`), linked mentions (backlinks), quick switcher
   (Ctrl/Cmd+O, creates on miss), full-text search, and a rendered
   reading view (Ctrl/Cmd+E).
 - **Sync model.** The client keeps the vault in memory, saves each note
-  ~0.8s after typing stops, and pulls changes on focus and every 30s.
-  Before every save it checks the file's etag; if another device changed
-  the file meanwhile, nothing is overwritten — the server's version keeps
-  the name and the local one is saved as `Name (conflict <date>).md`.
+  ~0.8s after typing stops (record first, then the note), and pulls
+  changes on focus and every 30s. Before every save it checks the note's
+  etag; if anything else changed the file meanwhile, nothing is
+  overwritten — the server's version keeps the name and the local one is
+  saved as `Name (conflict <date>).md`.
 - **Setup:** run `supabase/schema.sql`, then `supabase/vaults.sql`.
 
-Not yet: offline-first local cache (IndexedDB), rewriting links when a
+Not yet: an access layer for agents (e.g. an MCP server over the vault
+with per-user tokens), offline-first local cache (IndexedDB), rewriting links when a
 note is renamed, attachments/images, settings synced through the vault,
 realtime push instead of polling.
 
