@@ -1,0 +1,33 @@
+# /etc/systemd/system/startblank-vault.service
+[Unit]
+Description=startblank vault server (notes as files)
+After=network-online.target
+Wants=network-online.target
+# Don't start before the volume holding the notes is mounted.
+RequiresMountsFor=/mnt/vaults
+
+[Service]
+User=startblank
+Group=startblank
+WorkingDirectory=/opt/startblank/server
+EnvironmentFile=/etc/startblank/vault.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=2
+
+# Files it creates are group-writable, so agents running as members of the
+# startblank group can edit notes too.
+UMask=0007
+
+# Hardening: the service can write to the vault and nowhere else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/mnt/vaults/vaults
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

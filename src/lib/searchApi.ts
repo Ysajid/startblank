@@ -2,8 +2,8 @@ import { supabase } from "./supabase";
 import { noteTitle } from "./vaultSync";
 
 // Search and backlinks run on the server against public.note_index (see
-// supabase/search.sql), which the `index-note` Edge Function builds from
-// the note files — so the app never has to download a note it isn't
+// supabase/search.sql), which the vault server builds from the note files
+// as they change — so the app never has to download a note it isn't
 // showing.
 
 export interface SearchHit {
@@ -29,15 +29,6 @@ export async function fetchBacklinks(path: string): Promise<string[]> {
   return (data ?? []).map((row: { path: string }) => row.path).filter((p: string) => p !== path);
 }
 
-// Fire-and-forget: the index catching up late only delays search results,
-// so a failure here never fails the save that triggered it.
-export function requestIndex(op: "upsert" | "delete", paths: string[]): void {
-  if (paths.length === 0) return;
-  supabase.functions.invoke("index-note", { body: { op, paths } }).catch(() => undefined);
-}
-
-export async function rebuildIndex(): Promise<number> {
-  const { data, error } = await supabase.functions.invoke("index-note", { body: { op: "reindex" } });
-  if (error) throw error;
-  return (data as { indexed: number }).indexed;
-}
+// Rebuilds this user's search index from their files (the vault server
+// also keeps it current by itself as files change).
+export { reindexVault as rebuildIndex } from "./vaultStorage";

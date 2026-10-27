@@ -1,17 +1,15 @@
 import { supabase } from "./supabase";
 
-// Notes are files, not rows: each user's vault is a folder in the private
-// `vaults` Storage bucket, `<user id>/<note path>`, guarded by the policies
-// in supabase/vaults.sql so nobody can reach another user's folder.
+// Notes are files, not rows: each account's vault is a folder on the vault
+// server (server/ in this repo, e.g. on a DigitalOcean droplet), stored
+// under the notes' real names. Every request carries the user's Supabase
+// access token; the server only ever touches that user's folder.
 //
-// Paths the app works with are vault-relative ("Ideas/On walking.md").
-// Storage only accepts a narrow ASCII set in object keys, so anything else
-// (accents, non-Latin scripts, `#`, `[`, …) is stored quoted-printable
-// style — "Café" becomes "Caf=C3=A9" — and decoded on the way back.
+// Paths are vault-relative ("Ideas/On walking.md").
 
-const BUCKET = "vaults";
+const API = (import.meta.env.VITE_VAULT_API_URL ?? "").replace(/\/$/, "");
 
-// Marks a folder that has no notes in it yet (Storage has no real folders).
+// Marks a folder that has no notes in it yet (so empty folders survive).
 export const FOLDER_MARKER = ".keep";
 
 export interface RemoteFile {
@@ -19,98 +17,98 @@ export interface RemoteFile {
   etag: string;
 }
 
-const SAFE_CHAR = /[A-Za-z0-9 _\-.()!,'&@;+$]/;
-const utf8 = new TextEncoder();
-const utf8Decoder = new TextDecoder();
+// The server refused a conditional write: the file changed since the etag
+// we sent (or exists when we expected it not to).
+export class FileChangedError extends Error {}
 
-function encodeSegment(segment: string): string {
-  let out = "";
-  for (const ch of segment) {
-    if (SAFE_CHAR.test(ch)) {
-      out += ch;
-    } else {
-      for (const byte of utf8.encode(ch)) out += `=${byte.toString(16).toUpperCase().padStart(2, "0")}`;
-    }
+export class VaultRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message);
   }
-  return out;
 }
 
-function decodeSegment(segment: string): string {
-  return segment.replace(/(?:=[0-9A-F]{2})+/g, (run) => {
-    const bytes = new Uint8Array(run.length / 3);
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(run.slice(i * 3 + 1, i * 3 + 3), 16);
-    return utf8Decoder.decode(bytes);
+async function request(method: string, route: string, init: { body?: string; headers?: Record<string, string> } = {}) {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new VaultRequestError(401, "signed out");
+  const res = await fetch(`${API}${route}`, {
+    method,
+    body: init.body,
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}`, ...init.headers },
   });
+  if (res.status === 412) throw new FileChangedError(route);
+  return res;
 }
 
-function toKey(userId: string, path: string): string {
-  return `${userId}/${path.split("/").map(encodeSegment).join("/")}`;
+async function failure(res: Response): Promise<VaultRequestError> {
+  const detail = await res.json().catch(() => null);
+  return new VaultRequestError(res.status, detail?.error ?? `vault server answered ${res.status}`);
 }
 
-function fromKey(userId: string, key: string): string {
-  return key
-    .slice(userId.length + 1)
-    .split("/")
-    .map(decodeSegment)
-    .join("/");
+function fileRoute(path: string) {
+  return `/v1/file?path=${encodeURIComponent(path)}`;
 }
 
-function normalizeEtag(etag: string | undefined | null): string {
-  return (etag ?? "").replace(/^W\//, "").replace(/"/g, "");
+function etagHeader(res: Response): string | null {
+  return res.headers.get("ETag")?.replace(/^W\//, "").replace(/"/g, "") ?? null;
 }
 
-// One query for the whole vault (see list_vault_files() in
-// supabase/search.sql), instead of walking it folder by folder.
-export async function listVault(userId: string): Promise<RemoteFile[]> {
-  const { data, error } = await supabase.rpc("list_vault_files");
-  if (error) throw error;
-  return (data as { name: string; etag: string }[])
-    .filter((row) => row.name.startsWith(`${userId}/`))
-    .map((row) => ({ path: fromKey(userId, row.name), etag: normalizeEtag(row.etag) }));
+export async function listVault(): Promise<RemoteFile[]> {
+  const res = await request("GET", "/v1/files");
+  if (!res.ok) throw await failure(res);
+  return res.json();
 }
 
-export async function readFile(userId: string, path: string): Promise<string> {
-  const { data, error } = await supabase.storage.from(BUCKET).download(toKey(userId, path));
-  if (error) throw error;
-  return data.text();
+export async function readFile(path: string): Promise<string> {
+  const res = await request("GET", fileRoute(path));
+  if (!res.ok) throw await failure(res);
+  return res.text();
 }
 
-// The etag of the file as it is on the server right now, or null if it
-// doesn't exist — the check that keeps one device from silently
-// overwriting what another just saved.
-export async function remoteEtag(userId: string, path: string): Promise<string | null> {
-  const key = toKey(userId, path);
-  const { data, error } = await supabase.storage.from(BUCKET).info(key);
-  if (!error) return normalizeEtag(data.etag ?? data.metadata?.eTag);
-  // info() fails the same way for "missing" and "network down"; tell them apart.
-  // (exists() reports a 404 as data: false *with* an error attached.)
-  const { data: exists } = await supabase.storage.from(BUCKET).exists(key);
-  if (exists === false) return null;
-  throw error;
+// The file's etag on the server right now, or null if it doesn't exist.
+export async function remoteEtag(path: string): Promise<string | null> {
+  const res = await request("HEAD", fileRoute(path));
+  if (res.status === 404) return null;
+  if (!res.ok) throw await failure(res);
+  return etagHeader(res);
 }
 
-export async function writeFile(
-  userId: string,
-  path: string,
-  text: string,
-  contentType = "text/markdown"
-): Promise<void> {
-  const { error } = await supabase.storage.from(BUCKET).upload(toKey(userId, path), text, {
-    upsert: true,
-    // Never let a CDN or browser cache hand another device a stale copy.
-    cacheControl: "0",
-    contentType: `${contentType}; charset=utf-8`,
+// Writes the file and returns its new etag. With `expected`, the write only
+// happens if the file is still at that etag (null: still doesn't exist) —
+// otherwise FileChangedError, and nothing is overwritten.
+export async function writeFile(path: string, text: string, expected?: string | null): Promise<string> {
+  const headers: Record<string, string> = { "Content-Type": "text/plain; charset=utf-8" };
+  if (expected === null) headers["If-None-Match"] = "*";
+  else if (expected !== undefined) headers["If-Match"] = `"${expected}"`;
+  const res = await request("PUT", fileRoute(path), { body: text, headers });
+  if (!res.ok) throw await failure(res);
+  return (await res.json()).etag;
+}
+
+export async function moveFile(from: string, to: string): Promise<void> {
+  const res = await request("POST", "/v1/move", {
+    body: JSON.stringify({ from, to }),
+    headers: { "Content-Type": "application/json" },
   });
-  if (error) throw error;
+  if (!res.ok) throw await failure(res);
 }
 
-export async function moveFile(userId: string, from: string, to: string): Promise<void> {
-  const { error } = await supabase.storage.from(BUCKET).move(toKey(userId, from), toKey(userId, to));
-  if (error) throw error;
-}
-
-export async function removeFiles(userId: string, paths: string[]): Promise<void> {
+export async function removeFiles(paths: string[]): Promise<void> {
   if (paths.length === 0) return;
-  const { error } = await supabase.storage.from(BUCKET).remove(paths.map((p) => toKey(userId, p)));
-  if (error) throw error;
+  const res = await request("POST", "/v1/delete", {
+    body: JSON.stringify({ paths }),
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw await failure(res);
+}
+
+// Rebuilds this user's search index from their files on the server.
+export async function reindexVault(): Promise<number> {
+  const res = await request("POST", "/v1/reindex");
+  if (!res.ok) throw await failure(res);
+  return (await res.json()).indexed;
 }

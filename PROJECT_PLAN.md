@@ -9,10 +9,12 @@ it was written by hand, and pasted text stays visibly marked.
 
 - **Accounts, synced vaults.** Sign in (Supabase Auth, email + password) and
   the same vault is on every device.
-- **Notes are files, not rows.** Each note is a plain `.md` file in a
-  private Supabase Storage bucket at `vaults/<user id>/<path>.md`. Folders
-  are real path prefixes (an empty one holds a `.keep` marker). The
-  database is only used for published snapshots (§4.4).
+- **Notes are files, not rows.** Each note is a plain `.md` file on the
+  vault server (`server/`, deployed on a DigitalOcean droplet), stored
+  under its real name at `<VAULT_ROOT>/<user id>/<path>.md`. Folders are
+  real folders (an empty one holds a `.keep` marker). The server verifies
+  each request's Supabase token and only touches that user's folder.
+  Supabase holds accounts, published snapshots (§4.4) and the search index.
 - **Files are for agents too.** The point of storing notes as files is
   that they can be run through agents, AI services and personal-knowledge
   tooling. So a note file is pure Markdown — nothing app-specific inside.
@@ -34,24 +36,25 @@ it was written by hand, and pasted text stays visibly marked.
   (Ctrl/Cmd+O, creates on miss), full-text search, and a rendered
   reading view (Ctrl/Cmd+E).
 - **Sync model.** Signing in fetches only the vault's file list (one
-  query, `list_vault_files()`); a note is downloaded the first time it is
+  request, `GET /v1/files`); a note is downloaded the first time it is
   opened. Open notes save ~0.8s after typing stops (record first, then the
   note). The list is re-checked on focus and every 30s, and only open notes
   are re-downloaded when they change. Before every save the note's etag is
   checked; if anything else changed the file meanwhile, nothing is
   overwritten — the server's version keeps the name and the local one is
-  saved as `Name (conflict <date>).md`.
+  saved as `Name (conflict <date>).md`. Writes are conditional on the
+  server (`If-Match`), so a change slipping in between the check and the
+  write is refused rather than overwritten.
 - **Search and backlinks run on the server.** `note_index` is a derived,
   disposable index — searchable words (a tsvector, not the text), title,
-  `[[link]]` targets and a short excerpt — built from the files by the
-  `index-note` Edge Function. The app asks it to reindex each note it
-  saves, moves or deletes; an optional trigger on `storage.objects` also
-  catches files written by anything else (agents, scripts). Search is
-  multilingual ('simple' config, prefix matching); "Rebuild search index"
-  regenerates a user's index from their files.
-- **Setup:** run `supabase/schema.sql`, `supabase/vaults.sql`, then
-  `supabase/search.sql`; deploy the indexer with
-  `supabase functions deploy index-note --no-verify-jwt`.
+  `[[link]]` targets and a short excerpt — that the vault server updates
+  after every change, whether it came through the API or straight onto
+  the disk (it watches the vault folder, so agents working on the droplet
+  are indexed too). Search is multilingual ('simple' config, prefix
+  matching); "Rebuild search index" regenerates a user's index.
+- **Setup:** run `supabase/schema.sql`, `supabase/accounts.sql`,
+  `supabase/search.sql`; deploy the vault server per `server/README.md`;
+  set `VITE_VAULT_API_URL` for the app.
 
 Not yet: an access layer for agents (e.g. an MCP server over the vault
 with per-user tokens), an on-device cache of opened notes (IndexedDB),

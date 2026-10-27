@@ -3,19 +3,28 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 const server = new Map<string, { text: string; etag: string }>();
 let n = 0;
 let downloads = 0;
-const indexed: string[] = [];
-vi.mock("../searchApi", () => ({
-  requestIndex: (op: string, paths: string[]) => paths.forEach((p) => indexed.push(`${op}:${p}`)),
-}));
-vi.mock("../vaultStorage", () => ({
-  FOLDER_MARKER: ".keep",
-  listVault: async (uid: string) => [...server].filter(([k]) => k.startsWith(uid + "/")).map(([k, v]) => ({ path: k.slice(uid.length + 1), etag: v.etag })),
-  readFile: async (uid: string, p: string) => { downloads++; const f = server.get(`${uid}/${p}`); if (!f) throw new Error("404 " + p); return f.text; },
-  remoteEtag: async (uid: string, p: string) => server.get(`${uid}/${p}`)?.etag ?? null,
-  writeFile: async (uid: string, p: string, text: string) => { server.set(`${uid}/${p}`, { text, etag: `e${++n}` }); },
-  moveFile: async (uid: string, a: string, b: string) => { const f = server.get(`${uid}/${a}`)!; server.delete(`${uid}/${a}`); server.set(`${uid}/${b}`, f); },
-  removeFiles: async (uid: string, ps: string[]) => { ps.forEach((p) => server.delete(`${uid}/${p}`)); },
-}));
+// Runs once just before the next write is applied, to simulate something
+// else writing in between the app's check and its write.
+let beforeNextWrite: (() => void) | null = null;
+vi.mock("../vaultStorage", () => {
+  class FileChangedError extends Error {}
+  const U = "u1/";
+  return {
+    FOLDER_MARKER: ".keep",
+    FileChangedError,
+    listVault: async () => [...server].filter(([k]) => k.startsWith(U)).map(([k, v]) => ({ path: k.slice(U.length), etag: v.etag })),
+    readFile: async (p: string) => { downloads++; const f = server.get(U + p); if (!f) throw new Error("404"); return f.text; },
+    remoteEtag: async (p: string) => server.get(U + p)?.etag ?? null,
+    writeFile: async (p: string, text: string, expected?: string | null) => {
+      const hook = beforeNextWrite; beforeNextWrite = null; hook?.();
+      if (expected !== undefined && (server.get(U + p)?.etag ?? null) !== expected) throw new FileChangedError(p);
+      const etag = `e${++n}`; server.set(U + p, { text, etag }); return etag;
+    },
+    moveFile: async (a: string, b: string) => { const f = server.get(U + a)!; server.delete(U + a); server.set(U + b, f); },
+    removeFiles: async (ps: string[]) => { ps.forEach((p) => server.delete(U + p)); },
+  };
+});
+
 beforeAll(() => { (globalThis as any).window = globalThis; });
 const agentWrite = (p: string, text: string) => server.set(`u1/${p}`, { text, etag: `e${++n}` });
 const S = (k: number) => ({ keystrokes: k, edits: 0, pasteEvents: 0, pastedChars: 0 });
@@ -36,7 +45,7 @@ describe("agents and provenance", async () => {
   });
 
   it("marks agent text, keeps files clean, survives fresh devices", async () => {
-    const a = new VaultSync("u1");
+    const a = new VaultSync();
     await a.start();
     const p = a.createNote("Journal.md");
     a.updateNote(p, "hello world\n", S(12), []);
@@ -57,14 +66,14 @@ describe("agents and provenance", async () => {
     expect(score).toBeLessThan(40);
     expect(a.hasUnsavedChanges()).toBe(false); // nothing written back on load
 
-    const c = new VaultSync("u1"); await c.start(); await c.ensureLoaded(p);
+    const c = new VaultSync(); await c.start(); await c.ensureLoaded(p);
     expect(c.getSnapshot().notes[p].pasteRanges).toEqual(note.pasteRanges);
 
     // user types over the agent's sentence -> record catches up, file stays clean
     a.updateNote(p, "hello world\nmy own words\n", { ...note.stats, keystrokes: 25, edits: 3, pastedChars: 0 }, []);
     await a.flushNow();
     expect(server.get("u1/Journal.md")!.text).toBe("hello world\nmy own words\n");
-    const d = new VaultSync("u1"); await d.start(); await d.ensureLoaded(p);
+    const d = new VaultSync(); await d.start(); await d.ensureLoaded(p);
     expect(d.getSnapshot().notes[p].pasteRanges).toEqual([]);
 
     // agent-created note: all external
@@ -92,7 +101,7 @@ describe("agents and provenance", async () => {
   it("migrates v1 notes to clean markdown", async () => {
     server.clear();
     agentWrite("Old.md", '---\nstartblank: {"v":1,"keystrokes":5,"edits":0,"pasteEvents":0,"pastedChars":0,"pasted":[]}\n---\nhello');
-    const a = new VaultSync("u1"); await a.start(); await a.ensureLoaded("Old.md"); await tick(); await a.flushNow();
+    const a = new VaultSync(); await a.start(); await a.ensureLoaded("Old.md"); await tick(); await a.flushNow();
     expect(server.get("u1/Old.md")!.text).toBe("hello");
     expect(a.getSnapshot().notes["Old.md"].stats.keystrokes).toBe(5);
     expect(a.getSnapshot().notes["Old.md"].pasteRanges).toEqual([]);

@@ -11,7 +11,6 @@ import {
   removeFiles,
   writeFile,
 } from "./vaultStorage";
-import { requestIndex } from "./searchApi";
 
 export interface Note extends NoteContent {
   path: string;
@@ -138,7 +137,7 @@ export class VaultSync {
   private opening = new Map<string, Promise<void>>();
   private stopped = false;
 
-  constructor(private userId: string) {
+  constructor() {
     this.snapshot = this.buildSnapshot();
   }
 
@@ -255,7 +254,7 @@ export class VaultSync {
   }
 
   private async pull() {
-    const files = await listVault(this.userId);
+    const files = await listVault();
     const remote = new Map<string, string>();
     const records = new Map<string, string>();
     const folders = new Set<string>();
@@ -288,11 +287,11 @@ export class VaultSync {
       const entry = this.entries.get(path)!;
       const recordEtag = records.get(path) ?? null;
       const [text, recordText] = await Promise.all([
-        entry.etag !== etag ? readFile(this.userId, path) : entry.base!,
+        entry.etag !== etag ? readFile(path) : entry.base!,
         recordEtag === null
           ? null
           : entry.recordEtag !== recordEtag
-            ? readFile(this.userId, recordPath(path))
+            ? readFile(recordPath(path))
             : entry.recordBase,
       ]);
       return { text, recordText, recordEtag };
@@ -382,8 +381,8 @@ export class VaultSync {
         const current = this.entries.get(path);
         if (!current || current.loaded) return;
         const [text, recordText] = await Promise.all([
-          readFile(this.userId, path),
-          current.recordEtag === null ? null : readFile(this.userId, recordPath(path)).catch(() => null),
+          readFile(path),
+          current.recordEtag === null ? null : readFile(recordPath(path)).catch(() => null),
         ]);
         this.entries.set(path, this.build(path, text, current.etag, recordText, current.recordEtag));
       }).finally(() => this.opening.delete(path));
@@ -415,12 +414,12 @@ export class VaultSync {
     const body = entry.body;
     const record = serializeRecord(entry);
 
-    const current = await remoteEtag(this.userId, path);
+    const current = await remoteEtag(path);
     if (current !== null && current !== entry.etag) {
-      const remoteText = await readFile(this.userId, path);
+      const remoteText = await readFile(path);
       if (remoteText !== entry.base) {
-        const recordEtag = await remoteEtag(this.userId, recordPath(path));
-        const recordText = recordEtag === null ? null : await readFile(this.userId, recordPath(path));
+        const recordEtag = await remoteEtag(recordPath(path));
+        const recordText = recordEtag === null ? null : await readFile(recordPath(path));
         this.keepBoth(path, remoteText, current, recordText, recordEtag);
         return;
       }
@@ -430,15 +429,15 @@ export class VaultSync {
     // ahead of the file — never behind it, which would make our own typing
     // look like an outside edit.
     if (record !== entry.recordBase) {
-      await writeFile(this.userId, recordPath(path), record, "application/json");
+      entry.recordEtag = await writeFile(recordPath(path), record);
       entry.recordBase = record;
-      entry.recordEtag = await remoteEtag(this.userId, recordPath(path));
     }
     if (body !== entry.base) {
-      await writeFile(this.userId, path, body);
+      // Only if the file is still what we just checked: anything that wrote
+      // to it in between makes this fail, and the retry takes the conflict
+      // path above instead of overwriting it.
+      entry.etag = await writeFile(path, body, current);
       entry.base = body;
-      entry.etag = await remoteEtag(this.userId, path);
-      requestIndex("upsert", [path]);
     }
     // Typing that happened while the upload was in flight still needs saving.
     entry.dirty = serializeRecord(entry) !== record;
@@ -514,11 +513,9 @@ export class VaultSync {
     if (!entry) return;
     if (entry.dirty && onServer(entry)) await this.flush(from);
     window.clearTimeout(entry.timer);
-    if (hasRecord(entry)) await moveFile(this.userId, recordPath(from), recordPath(to));
+    if (hasRecord(entry)) await moveFile(recordPath(from), recordPath(to));
     if (onServer(entry)) {
-      await moveFile(this.userId, from, to);
-      requestIndex("delete", [from]);
-      requestIndex("upsert", [to]);
+      await moveFile(from, to);
     }
     this.entries.delete(from);
     this.entries.set(to, entry);
@@ -530,8 +527,7 @@ export class VaultSync {
       const entry = this.entries.get(path);
       if (!entry) return;
       window.clearTimeout(entry.timer);
-      await removeFiles(this.userId, this.filesOf(path));
-      requestIndex("delete", [path]);
+      await removeFiles(this.filesOf(path));
       this.entries.delete(path);
     });
   }
@@ -544,7 +540,7 @@ export class VaultSync {
 
   createFolder(path: string) {
     return this.enqueue(async () => {
-      await writeFile(this.userId, `${path}/${FOLDER_MARKER}`, "");
+      await writeFile(`${path}/${FOLDER_MARKER}`, "");
       this.folders.add(path);
     });
   }
@@ -558,7 +554,7 @@ export class VaultSync {
       for (const folder of [...this.folders]) {
         if (folder === from || isUnder(folder, from)) {
           const moved = `${to}${folder.slice(from.length)}`;
-          await moveFile(this.userId, `${folder}/${FOLDER_MARKER}`, `${moved}/${FOLDER_MARKER}`);
+          await moveFile(`${folder}/${FOLDER_MARKER}`, `${moved}/${FOLDER_MARKER}`);
           this.folders.delete(folder);
           this.folders.add(moved);
         }
@@ -572,8 +568,7 @@ export class VaultSync {
       const markers = [...this.folders]
         .filter((f) => f === path || isUnder(f, path))
         .map((f) => `${f}/${FOLDER_MARKER}`);
-      await removeFiles(this.userId, [...notes.flatMap((p) => this.filesOf(p)), ...markers]);
-      requestIndex("delete", notes);
+      await removeFiles([...notes.flatMap((p) => this.filesOf(p)), ...markers]);
       for (const p of notes) {
         window.clearTimeout(this.entries.get(p)!.timer);
         this.entries.delete(p);
@@ -590,7 +585,8 @@ export class VaultSync {
 }
 
 export function useVault(userId: string) {
-  const vault = useMemo(() => new VaultSync(userId), [userId]);
+  // A fresh vault per account; the server works out whose from the token.
+  const vault = useMemo(() => new VaultSync(), [userId]);
   const snapshot = useSyncExternalStore(vault.subscribe, vault.getSnapshot);
 
   useEffect(() => {

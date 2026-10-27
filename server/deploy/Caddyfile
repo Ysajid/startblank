@@ -1,0 +1,18 @@
+# /etc/caddy/Caddyfile — Caddy gets and renews the HTTPS certificates itself.
+# Point each name's DNS A record at the droplet's IP first.
+
+vault.example.com {
+	request_body {
+		max_size 6MB
+	}
+	reverse_proxy 127.0.0.1:8787
+}
+
+# Optional: serve the web app from the same droplet. Build it locally with
+# the right VITE_* values (`npm run build` in the repo root) and copy dist/
+# to /var/www/startblank.
+# app.example.com {
+# 	root * /var/www/startblank
+# 	try_files {path} /index.html
+# 	file_server
+# }

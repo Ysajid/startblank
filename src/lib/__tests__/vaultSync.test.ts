@@ -3,19 +3,27 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 const server = new Map<string, { text: string; etag: string }>();
 let n = 0;
 let downloads = 0;
-const indexed: string[] = [];
-vi.mock("../searchApi", () => ({
-  requestIndex: (op: string, paths: string[]) => paths.forEach((p) => indexed.push(`${op}:${p}`)),
-}));
-vi.mock("../vaultStorage", () => ({
-  FOLDER_MARKER: ".keep",
-  listVault: async (uid: string) => [...server].filter(([k]) => k.startsWith(uid + "/")).map(([k, v]) => ({ path: k.slice(uid.length + 1), etag: v.etag })),
-  readFile: async (uid: string, p: string) => { downloads++; const f = server.get(`${uid}/${p}`); if (!f) throw new Error("404"); return f.text; },
-  remoteEtag: async (uid: string, p: string) => server.get(`${uid}/${p}`)?.etag ?? null,
-  writeFile: async (uid: string, p: string, text: string) => { server.set(`${uid}/${p}`, { text, etag: `e${++n}` }); },
-  moveFile: async (uid: string, a: string, b: string) => { const f = server.get(`${uid}/${a}`)!; server.delete(`${uid}/${a}`); server.set(`${uid}/${b}`, f); },
-  removeFiles: async (uid: string, ps: string[]) => { ps.forEach((p) => server.delete(`${uid}/${p}`)); },
-}));
+// Runs once just before the next write is applied, to simulate something
+// else writing in between the app's check and its write.
+let beforeNextWrite: (() => void) | null = null;
+vi.mock("../vaultStorage", () => {
+  class FileChangedError extends Error {}
+  const U = "u1/";
+  return {
+    FOLDER_MARKER: ".keep",
+    FileChangedError,
+    listVault: async () => [...server].filter(([k]) => k.startsWith(U)).map(([k, v]) => ({ path: k.slice(U.length), etag: v.etag })),
+    readFile: async (p: string) => { downloads++; const f = server.get(U + p); if (!f) throw new Error("404"); return f.text; },
+    remoteEtag: async (p: string) => server.get(U + p)?.etag ?? null,
+    writeFile: async (p: string, text: string, expected?: string | null) => {
+      const hook = beforeNextWrite; beforeNextWrite = null; hook?.();
+      if (expected !== undefined && (server.get(U + p)?.etag ?? null) !== expected) throw new FileChangedError(p);
+      const etag = `e${++n}`; server.set(U + p, { text, etag }); return etag;
+    },
+    moveFile: async (a: string, b: string) => { const f = server.get(U + a)!; server.delete(U + a); server.set(U + b, f); },
+    removeFiles: async (ps: string[]) => { ps.forEach((p) => server.delete(U + p)); },
+  };
+});
 
 beforeAll(() => { (globalThis as any).window = globalThis; });
 const S = (k: number) => ({ keystrokes: k, edits: 0, pasteEvents: 0, pastedChars: 0 });
@@ -23,7 +31,7 @@ const S = (k: number) => ({ keystrokes: k, edits: 0, pasteEvents: 0, pastedChars
 describe("VaultSync across two devices", async () => {
   const { VaultSync } = await import("../vaultSync");
   it("syncs, detects conflicts, renames", async () => {
-    const a = new VaultSync("u1"), b = new VaultSync("u1");
+    const a = new VaultSync(), b = new VaultSync();
     await a.start();
     const p = a.createNote("Ideas/Note.md");
     a.updateNote(p, "hello", S(5), []);
@@ -67,8 +75,20 @@ describe("VaultSync across two devices", async () => {
     expect(a.getSnapshot().versions[p]).toBe(v);
     expect(a.hasUnsavedChanges()).toBe(false);
 
-    // saves ask for the note to be indexed
-    expect(indexed).toContain(`upsert:${p}`);
+    // something writes between the app's check and its write: the server
+    // refuses, and the retry keeps both versions instead of overwriting
+    a.updateNote(p, "my careful edit", S(4), []);
+    let raced = false;
+    const realHook = () => { server.set("u1/" + p, { text: "sneaky agent write", etag: `e${++n}` }); raced = true; };
+    beforeNextWrite = () => { beforeNextWrite = realHook; }; // the record write goes first
+    await a.flushNow().catch(() => {});
+    expect(raced).toBe(true);
+    expect(server.get("u1/" + p)!.text).toBe("sneaky agent write");
+    await new Promise((r) => setTimeout(r, 5));
+    await a.refresh();
+    await a.flushNow();
+    expect(a.getSnapshot().notes[p].body).toBe("sneaky agent write");
+    expect(Object.values(a.getSnapshot().notes).some((x) => x.body === "my careful edit" && x.path.includes("conflict"))).toBe(true);
 
     // a note nobody has opened changing elsewhere costs no download
     const unopened = b.createNote("Unopened.md");
@@ -84,7 +104,6 @@ describe("VaultSync across two devices", async () => {
     await a.deleteNote(unopened);
     expect(server.has("u1/Unopened.md")).toBe(false);
     expect(server.has("u1/.startblank/record/Unopened.md.json")).toBe(false);
-    expect(indexed).toContain("delete:Unopened.md");
 
     // folder rename and delete propagate
     await a.renameFolder("Ideas", "Thoughts");

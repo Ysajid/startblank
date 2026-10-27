@@ -258,7 +258,7 @@ export function Workspace({ session }: { session: Session }) {
       const count = await rebuildIndex();
       setError(`Search index rebuilt from ${count} ${count === 1 ? "note" : "notes"}.`);
     } catch {
-      setError("Couldn't rebuild the search index — is the index-note function deployed?");
+      setError("Couldn't rebuild the search index — is the vault server reachable?");
     }
   }
 

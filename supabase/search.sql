@@ -1,16 +1,15 @@
--- startblank: server-side search, backlinks and the vault manifest
+-- startblank: server-side search and backlinks
 --
--- Run this once in the Supabase SQL editor, after vaults.sql. Then deploy
--- the indexer (see supabase/functions/index-note/index.ts):
+-- Run this once in the Supabase SQL editor, after accounts.sql.
 --
---   supabase functions deploy index-note --no-verify-jwt
---
--- The files in the `vaults` bucket stay the only source of truth. The
--- table below is a derived, disposable search index: it holds the words of
--- each note as a tsvector (lexemes, not the text), its title, the targets
--- of its [[links]] and a short excerpt for search results — never the
--- note itself. It can be dropped and rebuilt from the files at any time
--- (the indexer's "reindex" op does that for one user).
+-- The note files on the vault server stay the only source of truth. The
+-- table below is a derived, disposable search index that the vault server
+-- keeps current as files change (including files edited directly on the
+-- server by agents or scripts). It holds the words of each note as a
+-- tsvector (lexemes, not the text), its title, the targets of its [[links]]
+-- and a short excerpt for search results — never the note itself. It can
+-- be dropped and rebuilt from the files at any time
+-- (`npm run reindex-all` on the server).
 
 create table if not exists public.note_index (
   owner_id uuid not null references auth.users (id) on delete cascade,
@@ -44,7 +43,7 @@ create policy "Users read their own index"
   to authenticated
   using (owner_id = (select auth.uid()));
 
--- ---- Written by the indexer only -------------------------------------------
+-- ---- Written by the vault server only (service role) -------------------------------------------
 
 create or replace function public.index_note(
   p_owner uuid,
@@ -93,24 +92,6 @@ grant execute on function public.index_note(uuid, text, text, text, text, text[]
 grant execute on function public.unindex_note(uuid, text) to service_role;
 
 -- ---- Called by the app (as the signed-in user) ------------------------------
-
--- Every file in the caller's vault with its etag, in one query — replaces
--- walking the bucket folder by folder. Runs as the caller, so the storage
--- policies in vaults.sql still decide what they can see.
-create or replace function public.list_vault_files()
-returns table (name text, etag text)
-language sql
-stable
-security invoker
-set search_path = public
-as $$
-  select o.name, coalesce(o.metadata ->> 'eTag', '')
-  from storage.objects o
-  where o.bucket_id = 'vaults'
-    and o.name like (select auth.uid())::text || '/%';
-$$;
-
-grant execute on function public.list_vault_files() to authenticated;
 
 -- Search as you type: every word must match, the last one as a prefix-match
 -- on any word. Titles also match as plain substrings, so a half-typed
@@ -164,60 +145,3 @@ as $$
 $$;
 
 grant execute on function public.note_backlinks(text[]) to authenticated;
-
--- ---- Optional: index writes from anywhere ------------------------------------
---
--- The app asks the indexer to reindex every note it saves. To also catch
--- files written by anything else (agents, scripts, the dashboard), add the
--- indexer's URL and a shared secret to Vault and install this trigger:
---
---   select vault.create_secret('https://<project-ref>.supabase.co/functions/v1/index-note', 'note_indexer_url');
---   select vault.create_secret('<long random string>', 'note_indexer_secret');
---   -- and set the same secret on the function:
---   --   supabase secrets set NOTE_INDEXER_SECRET=<long random string>
---
--- Some projects don't allow triggers on storage.objects; if so, this block
--- just reports it and everything else keeps working.
-
-create extension if not exists pg_net;
-
-create or replace function public.notify_note_indexer()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  indexer_url text;
-  indexer_secret text;
-  hdrs jsonb;
-begin
-  select decrypted_secret into indexer_url from vault.decrypted_secrets where name = 'note_indexer_url';
-  select decrypted_secret into indexer_secret from vault.decrypted_secrets where name = 'note_indexer_secret';
-  if indexer_url is null or indexer_secret is null then
-    return null;
-  end if;
-  hdrs := jsonb_build_object('Content-Type', 'application/json', 'x-indexer-secret', indexer_secret);
-
-  -- Files under dot-folders (.startblank records, .keep markers) aren't notes.
-  if tg_op <> 'INSERT' and old.bucket_id = 'vaults' and position('/.' in old.name) = 0
-     and (tg_op = 'DELETE' or old.name is distinct from new.name) then
-    perform net.http_post(indexer_url, jsonb_build_object('op', 'delete', 'keys', jsonb_build_array(old.name)), headers := hdrs);
-  end if;
-  if tg_op <> 'DELETE' and new.bucket_id = 'vaults' and position('/.' in new.name) = 0 then
-    perform net.http_post(indexer_url, jsonb_build_object('op', 'upsert', 'keys', jsonb_build_array(new.name)), headers := hdrs);
-  end if;
-  return null;
-end;
-$$;
-
-do $$
-begin
-  drop trigger if exists note_indexer on storage.objects;
-  create trigger note_indexer
-    after insert or update or delete on storage.objects
-    for each row execute function public.notify_note_indexer();
-exception when insufficient_privilege then
-  raise notice 'Could not add the note_indexer trigger on storage.objects (%). The app still indexes its own saves.', sqlerrm;
-end;
-$$;
