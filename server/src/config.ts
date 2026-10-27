@@ -12,7 +12,8 @@ export const config = {
   // One folder per account lives under here: <root>/<user id>/<note path>.
   vaultRoot: required("VAULT_ROOT"),
   supabaseUrl: required("SUPABASE_URL").replace(/\/$/, ""),
-  // Used only to write the search index (public.note_index).
+  // Used only to write the search index (public.note_index): the project's
+  // secret key (sb_secret_…) or legacy service_role key.
   serviceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
   // Only for projects still on the legacy shared JWT secret; projects using
   // JWT signing keys are verified against their published JWKS instead.

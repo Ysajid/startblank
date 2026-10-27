@@ -50,14 +50,18 @@ function titleOf(vaultPath: string): string {
 
 // ---- Talking to Supabase -----------------------------------------------------
 
+// Works with both kinds of Supabase key: a secret key (sb_secret_…) goes
+// in `apikey` only — Supabase rejects it as a bearer token — while a legacy
+// service_role key is a JWT and is also sent as the bearer token.
+function supabaseHeaders(): Record<string, string> {
+  const key = config.serviceRoleKey;
+  return key.startsWith("eyJ") ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key };
+}
+
 async function rpc(fn: string, args: Record<string, unknown>): Promise<unknown> {
   const res = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${fn}`, {
     method: "POST",
-    headers: {
-      apikey: config.serviceRoleKey,
-      Authorization: `Bearer ${config.serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { ...supabaseHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(args),
   });
   if (!res.ok) throw new Error(`${fn} failed: ${res.status} ${await res.text()}`);
@@ -115,7 +119,7 @@ export async function reindexUser(userId: string): Promise<number> {
   }
   const res = await fetch(
     `${config.supabaseUrl}/rest/v1/note_index?select=path&owner_id=eq.${encodeURIComponent(userId)}`,
-    { headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` } }
+    { headers: supabaseHeaders() }
   );
   if (!res.ok) throw new Error(`listing the index failed: ${res.status}`);
   const live = new Set(notes);
