@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { PasteRange } from "./provenance";
 import type { WritingStats } from "../types";
-import { loadNote, notePathFromRecord, recordPath, serializeRecord, type NoteContent } from "./noteFile";
+import { loadNote, serializeRecord, type NoteContent } from "./noteFile";
 import {
-  FOLDER_MARKER,
+  NoteChangedError,
+  NotFoundError,
+  createFolder,
+  deleteFolder,
+  deleteNotes,
   listVault,
-  moveFile,
-  readFile,
-  remoteEtag,
-  removeFiles,
-  writeFile,
+  moveFolder,
+  moveNote,
+  readNote,
+  saveNote,
+  type StoredNote,
 } from "./vaultStorage";
 
 export interface Note extends NoteContent {
@@ -33,14 +37,12 @@ export interface VaultSnapshot {
 }
 
 interface Entry extends NoteContent {
-  // The note file's text as last seen on the server (null: not on the
-  // server yet) and its etag — what a save compares against to detect that
-  // another device, or an agent, changed the file in the meantime.
+  // The note's text and record as last seen on the server (null: not saved
+  // yet), and the version they belong to. A save names that version, so the
+  // server refuses it if another device or an agent changed the note since.
   base: string | null;
-  etag: string | null;
-  // The same for the note's hand-writing record (see noteFile.ts).
   recordBase: string | null;
-  recordEtag: string | null;
+  version: number | null;
   dirty: boolean;
   loaded: boolean;
   timer?: number;
@@ -70,33 +72,27 @@ function emptyStats(): WritingStats {
   return { keystrokes: 0, edits: 0, pasteEvents: 0, pastedChars: 0 };
 }
 
-// A note known from the vault listing whose file hasn't been downloaded.
-function stub(etag: string, recordEtag: string | null): Entry {
+// A note known from the vault listing that hasn't been downloaded yet.
+function stub(version: number): Entry {
   return {
     body: "",
     stats: emptyStats(),
     pasteRanges: [],
     base: null,
-    etag,
     recordBase: null,
-    recordEtag,
+    version,
     dirty: false,
     loaded: false,
   };
 }
 
-// Whether the note file exists on the server (as far as we know).
+function unsaved(content: NoteContent): Entry {
+  return { ...content, base: null, recordBase: null, version: null, dirty: true, loaded: true };
+}
+
+// Whether the note exists on the server (as far as we know).
 function onServer(entry: Entry): boolean {
-  return entry.base !== null || entry.etag !== null;
-}
-
-function hasRecord(entry: Entry): boolean {
-  return entry.recordBase !== null || entry.recordEtag !== null;
-}
-
-// Dot-folders (.startblank, .obsidian, …) hold app data, not notes.
-function isHidden(path: string): boolean {
-  return path.split("/").some((segment) => segment.startsWith("."));
+  return entry.version !== null;
 }
 
 function isUnder(path: string, folder: string): boolean {
@@ -219,20 +215,13 @@ export class VaultSync {
     return this.enqueue(() => this.pull()).catch(() => undefined);
   }
 
-  private build(
-    path: string,
-    text: string,
-    etag: string | null,
-    recordText: string | null,
-    recordEtag: string | null
-  ): Entry {
-    const { content, migrate } = loadNote(text, recordText);
+  private build(path: string, stored: StoredNote): Entry {
+    const { content, migrate } = loadNote(stored.body, stored.record);
     const entry: Entry = {
       ...content,
-      base: text,
-      etag,
-      recordBase: recordText,
-      recordEtag,
+      base: stored.body,
+      recordBase: stored.record,
+      version: stored.version,
       dirty: migrate,
       loaded: true,
     };
@@ -240,80 +229,51 @@ export class VaultSync {
     return entry;
   }
 
-  private replaceFromServer(
-    path: string,
-    text: string,
-    etag: string,
-    recordText: string | null,
-    recordEtag: string | null
-  ) {
+  private replaceFromServer(path: string, stored: StoredNote) {
     const previous = this.entries.get(path);
     window.clearTimeout(previous?.timer);
-    this.entries.set(path, this.build(path, text, etag, recordText, recordEtag));
+    this.entries.set(path, this.build(path, stored));
     this.versions[path] = (this.versions[path] ?? 0) + 1;
   }
 
   private async pull() {
-    const files = await listVault();
-    const remote = new Map<string, string>();
-    const records = new Map<string, string>();
-    const folders = new Set<string>();
-    for (const file of files) {
-      const recordOf = notePathFromRecord(file.path);
-      if (recordOf !== null) records.set(recordOf, file.etag);
-      else if (isHidden(parentOf(file.path))) continue;
-      else if (baseName(file.path) === FOLDER_MARKER) folders.add(parentOf(file.path));
-      else if (!isHidden(file.path) && file.path.toLowerCase().endsWith(NOTE_EXT)) remote.set(file.path, file.etag);
-    }
+    const listing = await listVault();
+    const remote = new Map(listing.notes.map((n) => [n.path, n.version]));
 
-    // New and unopened notes only need their etags; just the notes that are
-    // open (downloaded) are re-fetched when they change.
-    for (const [path, etag] of remote) {
+    // New and unopened notes only need their versions; just the notes that
+    // are open (downloaded) are re-fetched when they change.
+    for (const [path, version] of remote) {
       const entry = this.entries.get(path);
-      const recordEtag = records.get(path) ?? null;
-      if (!entry) {
-        this.entries.set(path, stub(etag, recordEtag));
-      } else if (!entry.loaded) {
-        entry.etag = etag;
-        entry.recordEtag = recordEtag;
-      }
+      if (!entry) this.entries.set(path, stub(version));
+      else if (!entry.loaded) entry.version = version;
     }
 
-    const changed = [...remote].filter(([path, etag]) => {
+    const changed = [...remote].filter(([path, version]) => {
       const entry = this.entries.get(path)!;
-      return entry.loaded && (entry.etag !== etag || entry.recordEtag !== (records.get(path) ?? null));
+      return entry.loaded && entry.version !== version;
     });
-    const downloads = await mapLimit(changed, DOWNLOAD_CONCURRENCY, async ([path, etag]) => {
-      const entry = this.entries.get(path)!;
-      const recordEtag = records.get(path) ?? null;
-      const [text, recordText] = await Promise.all([
-        entry.etag !== etag ? readFile(path) : entry.base!,
-        recordEtag === null
-          ? null
-          : entry.recordEtag !== recordEtag
-            ? readFile(recordPath(path))
-            : entry.recordBase,
-      ]);
-      return { text, recordText, recordEtag };
-    });
+    const fetched = await mapLimit(changed, DOWNLOAD_CONCURRENCY, ([path]) =>
+      readNote(path).catch((e) => {
+        if (e instanceof NotFoundError) return null; // deleted since the listing
+        throw e;
+      })
+    );
 
-    changed.forEach(([path, etag], i) => {
-      const { text, recordText, recordEtag } = downloads[i];
+    changed.forEach(([path], i) => {
+      const stored = fetched[i];
       const entry = this.entries.get(path)!;
-      const noteChanged = text !== entry.base;
-      if (!noteChanged && recordText === entry.recordBase) {
-        // our own save, now with its etags
-        entry.etag = etag;
-        entry.recordEtag = recordEtag;
+      if (!stored) return;
+      if (stored.body === entry.base && stored.record === entry.recordBase) {
+        entry.version = stored.version; // nothing new for us
       } else if (!entry.dirty) {
-        this.replaceFromServer(path, text, etag, recordText, recordEtag);
-      } else if (noteChanged) {
-        this.keepBoth(path, text, etag, recordText, recordEtag);
+        this.replaceFromServer(path, stored);
+      } else if (stored.body !== entry.base) {
+        this.keepBoth(path, stored);
       } else {
         // Only the record moved on while we have unsaved edits; our next
         // save replaces it.
-        entry.recordBase = recordText;
-        entry.recordEtag = recordEtag;
+        entry.recordBase = stored.record;
+        entry.version = stored.version;
       }
     });
 
@@ -321,43 +281,28 @@ export class VaultSync {
       if (remote.has(path) || !onServer(entry)) continue;
       if (entry.dirty) {
         // Deleted elsewhere while being edited here: the edits win, so
-        // treat it as a brand-new file on the next save.
+        // treat it as a brand-new note on the next save.
         entry.base = null;
-        entry.etag = null;
+        entry.recordBase = null;
+        entry.version = null;
       } else {
         this.entries.delete(path);
       }
     }
 
-    this.folders = folders;
+    this.folders = new Set(listing.folders);
   }
 
   // Both this device and something else (another device, an agent) changed
   // the same note. Nothing is thrown away: the server's version takes the
   // original name, ours is saved next to it as a conflict copy.
-  private keepBoth(
-    path: string,
-    remoteText: string,
-    etag: string,
-    recordText: string | null,
-    recordEtag: string | null
-  ) {
+  private keepBoth(path: string, stored: StoredNote) {
     const local = this.entries.get(path)!;
     const copyPath = this.uniquePath(
       `${path.slice(0, -NOTE_EXT.length)} (conflict ${timestamp()})${NOTE_EXT}`
     );
-    this.entries.set(copyPath, {
-      body: local.body,
-      stats: local.stats,
-      pasteRanges: local.pasteRanges,
-      base: null,
-      etag: null,
-      recordBase: null,
-      recordEtag: null,
-      dirty: true,
-      loaded: true,
-    });
-    this.replaceFromServer(path, remoteText, etag, recordText, recordEtag);
+    this.entries.set(copyPath, unsaved(local));
+    this.replaceFromServer(path, stored);
     this.scheduleSave(copyPath, 0);
     this.notice = `“${noteTitle(path)}” was changed somewhere else while you were editing it. Your version was kept as “${noteTitle(copyPath)}”.`;
   }
@@ -371,7 +316,7 @@ export class VaultSync {
     }
   }
 
-  // Downloads a listed note (and its record) the first time it's opened.
+  // Downloads a listed note (with its record) the first time it's opened.
   ensureLoaded(path: string): Promise<void> {
     const entry = this.entries.get(path);
     if (!entry || entry.loaded) return Promise.resolve();
@@ -380,11 +325,7 @@ export class VaultSync {
       pending = this.enqueue(async () => {
         const current = this.entries.get(path);
         if (!current || current.loaded) return;
-        const [text, recordText] = await Promise.all([
-          readFile(path),
-          current.recordEtag === null ? null : readFile(recordPath(path)).catch(() => null),
-        ]);
-        this.entries.set(path, this.build(path, text, current.etag, recordText, current.recordEtag));
+        this.entries.set(path, this.build(path, await readNote(path)));
       }).finally(() => this.opening.delete(path));
       this.opening.set(path, pending);
     }
@@ -414,32 +355,34 @@ export class VaultSync {
     const body = entry.body;
     const record = serializeRecord(entry);
 
-    const current = await remoteEtag(path);
-    if (current !== null && current !== entry.etag) {
-      const remoteText = await readFile(path);
-      if (remoteText !== entry.base) {
-        const recordEtag = await remoteEtag(recordPath(path));
-        const recordText = recordEtag === null ? null : await readFile(recordPath(path));
-        this.keepBoth(path, remoteText, current, recordText, recordEtag);
+    try {
+      // Text and record in one write, only if the note is still at the
+      // version we last saw.
+      entry.version = await saveNote(path, body, record, entry.version);
+      entry.base = body;
+      entry.recordBase = record;
+    } catch (e) {
+      if (!(e instanceof NoteChangedError)) throw e;
+      const stored = await readNote(path).catch((err) => {
+        if (err instanceof NotFoundError) return null;
+        throw err;
+      });
+      if (!stored) {
+        // Deleted elsewhere: our edits win; save it as a new note.
+        entry.base = entry.recordBase = null;
+        entry.version = null;
+      } else if (stored.body === entry.base) {
+        // Same text (only the record moved on): save again on top of it.
+        entry.version = stored.version;
+        entry.recordBase = stored.record;
+      } else {
+        this.keepBoth(path, stored);
         return;
       }
+      this.scheduleSave(path, 0);
+      return;
     }
-
-    // Record first: if the note upload then fails, the record merely runs
-    // ahead of the file — never behind it, which would make our own typing
-    // look like an outside edit.
-    if (record !== entry.recordBase) {
-      entry.recordEtag = await writeFile(recordPath(path), record);
-      entry.recordBase = record;
-    }
-    if (body !== entry.base) {
-      // Only if the file is still what we just checked: anything that wrote
-      // to it in between makes this fail, and the retry takes the conflict
-      // path above instead of overwriting it.
-      entry.etag = await writeFile(path, body, current);
-      entry.base = body;
-    }
-    // Typing that happened while the upload was in flight still needs saving.
+    // Typing that happened while the save was in flight still needs saving.
     entry.dirty = serializeRecord(entry) !== record;
     if (entry.dirty) this.scheduleSave(path);
   }
@@ -451,13 +394,17 @@ export class VaultSync {
   }
 
   // Saves everything right now and resolves once the server has it (or
-  // rejects if it couldn't) — used before signing out.
+  // rejects if it couldn't) — used before signing out. A save can lead to
+  // another (a conflict copy, a note deleted elsewhere being recreated), so
+  // this runs a few passes.
   async flushNow() {
-    for (const [path, entry] of this.entries) {
-      window.clearTimeout(entry.timer);
-      if (entry.dirty) this.enqueue(() => this.flush(path)).catch(() => undefined);
+    for (let pass = 0; pass < 3 && this.hasUnsavedChanges(); pass++) {
+      for (const [path, entry] of this.entries) {
+        window.clearTimeout(entry.timer);
+        if (entry.dirty) this.enqueue(() => this.flush(path)).catch(() => undefined);
+      }
+      await this.queue;
     }
-    await this.queue;
     if (this.hasUnsavedChanges()) throw new Error("Some notes couldn't be saved.");
   }
 
@@ -480,17 +427,7 @@ export class VaultSync {
 
   createNote(path: string, content?: NoteContent): string {
     const target = this.uniquePath(path);
-    this.entries.set(target, {
-      body: content?.body ?? "",
-      stats: content?.stats ?? emptyStats(),
-      pasteRanges: content?.pasteRanges ?? [],
-      base: null,
-      etag: null,
-      recordBase: null,
-      recordEtag: null,
-      dirty: true,
-      loaded: true,
-    });
+    this.entries.set(target, unsaved(content ?? { body: "", stats: emptyStats(), pasteRanges: [] }));
     this.scheduleSave(target, 0);
     this.emit();
     return target;
@@ -513,10 +450,7 @@ export class VaultSync {
     if (!entry) return;
     if (entry.dirty && onServer(entry)) await this.flush(from);
     window.clearTimeout(entry.timer);
-    if (hasRecord(entry)) await moveFile(recordPath(from), recordPath(to));
-    if (onServer(entry)) {
-      await moveFile(from, to);
-    }
+    if (onServer(entry)) await moveNote(from, to);
     this.entries.delete(from);
     this.entries.set(to, entry);
     if (entry.dirty) this.scheduleSave(to, 0);
@@ -527,20 +461,14 @@ export class VaultSync {
       const entry = this.entries.get(path);
       if (!entry) return;
       window.clearTimeout(entry.timer);
-      await removeFiles(this.filesOf(path));
+      if (onServer(entry)) await deleteNotes([path]);
       this.entries.delete(path);
     });
   }
 
-  // The server files that make up a note: the Markdown and its record.
-  private filesOf(path: string): string[] {
-    const entry = this.entries.get(path)!;
-    return [...(onServer(entry) ? [path] : []), ...(hasRecord(entry) ? [recordPath(path)] : [])];
-  }
-
   createFolder(path: string) {
     return this.enqueue(async () => {
-      await writeFile(`${path}/${FOLDER_MARKER}`, "");
+      await createFolder(path);
       this.folders.add(path);
     });
   }
@@ -548,15 +476,28 @@ export class VaultSync {
   renameFolder(from: string, to: string) {
     return this.enqueue(async () => {
       if (this.pathExists(to)) throw new Error("Something with that name already exists.");
-      for (const path of [...this.entries.keys()]) {
-        if (isUnder(path, from)) await this.moveOne(path, `${to}${path.slice(from.length)}`);
+      const inside = [...this.entries.keys()].filter((p) => isUnder(p, from));
+      for (const path of inside) {
+        const entry = this.entries.get(path)!;
+        if (entry.dirty && onServer(entry)) await this.flush(path);
+      }
+      // One step on the server for the whole folder…
+      await moveFolder(from, to).catch((e) => {
+        if (!(e instanceof NotFoundError)) throw e; // nothing of it saved yet
+      });
+      // …and the same rename locally.
+      for (const path of inside) {
+        const entry = this.entries.get(path)!;
+        window.clearTimeout(entry.timer);
+        const moved = `${to}${path.slice(from.length)}`;
+        this.entries.delete(path);
+        this.entries.set(moved, entry);
+        if (entry.dirty) this.scheduleSave(moved, 0);
       }
       for (const folder of [...this.folders]) {
         if (folder === from || isUnder(folder, from)) {
-          const moved = `${to}${folder.slice(from.length)}`;
-          await moveFile(`${folder}/${FOLDER_MARKER}`, `${moved}/${FOLDER_MARKER}`);
           this.folders.delete(folder);
-          this.folders.add(moved);
+          this.folders.add(`${to}${folder.slice(from.length)}`);
         }
       }
     });
@@ -564,12 +505,9 @@ export class VaultSync {
 
   deleteFolder(path: string) {
     return this.enqueue(async () => {
-      const notes = [...this.entries.keys()].filter((p) => isUnder(p, path));
-      const markers = [...this.folders]
-        .filter((f) => f === path || isUnder(f, path))
-        .map((f) => `${f}/${FOLDER_MARKER}`);
-      await removeFiles([...notes.flatMap((p) => this.filesOf(p)), ...markers]);
-      for (const p of notes) {
+      await deleteFolder(path);
+      for (const p of [...this.entries.keys()]) {
+        if (!isUnder(p, path)) continue;
         window.clearTimeout(this.entries.get(p)!.timer);
         this.entries.delete(p);
       }

@@ -3,20 +3,22 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Stores startblank notes as plain Markdown files on disk, one folder per account.",
+  "description": "Stores startblank notes in Postgres, one isolated vault per account.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p .",
     "start": "node dist/index.js",
-    "reindex-all": "node dist/index.js reindex-all"
+    "migrate": "node dist/migrate.js"
   },
   "dependencies": {
-    "jose": "^6.2.13"
+    "jose": "^6.2.13",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
     "typescript": "^7.0.2"
   }
 }

@@ -9,55 +9,50 @@ it was written by hand, and pasted text stays visibly marked.
 
 - **Accounts, synced vaults.** Sign in (Supabase Auth, email + password) and
   the same vault is on every device.
-- **Notes are files, not rows.** Each note is a plain `.md` file on the
-  vault server (`server/`, deployed on a DigitalOcean droplet), stored
-  under its real name at `<VAULT_ROOT>/<user id>/<path>.md`. Folders are
-  real folders (an empty one holds a `.keep` marker). The server verifies
-  each request's Supabase token and only touches that user's folder.
-  Supabase holds accounts, published snapshots (§4.4) and the search index.
-- **Files are for agents too.** The point of storing notes as files is
-  that they can be run through agents, AI services and personal-knowledge
-  tooling. So a note file is pure Markdown — nothing app-specific inside.
-- **The record lives beside the file.** The Blank Score counts and the
-  ranges not written by hand live in a sidecar,
-  `.startblank/record/<note path>.json`, along with a copy of the note as
-  the app last saved it. Dot-folders are app data and never shown as notes.
-- **Outside edits are attributed, not trusted.** When a note's file no
-  longer matches the copy in its record, something else wrote to it (an
-  agent, an AI service, another editor). The app diffs the two — by line,
+- **Notes live in Postgres on our own server.** The vault server
+  (`server/`, on a DigitalOcean droplet) keeps each note as one row — its
+  Markdown text and its hand-writing record, saved together — plus folders
+  and a revision history tagged by author (`app` or `agent:<name>`).
+  Isolation is enforced by the database: the server connects as a role
+  under row-level security, pinned per request to the signed-in user.
+  Supabase only provides sign-in and published share links (§4.4).
+  (An earlier version stored notes as files on disk; dropped in favour of
+  the database once agents were to reach notes only through the API.)
+- **Notes stay plain Markdown.** Paths look like file paths
+  (`Ideas/On walking.md`), so a vault exports cleanly as a folder of
+  Markdown files, and agents read and write ordinary Markdown.
+- **The writing record is honest about outside edits.** The record keeps a
+  copy of the text as the app last saved it. When the stored text differs
+  (an agent or another tool changed it), the app diffs the two — by line,
   then by word — and marks exactly the inserted text as not written here,
   the same way pasted text is marked; removed text drops out of the
-  counts. This is deterministic, so every device reaches the same result
-  without writing anything back, and an agent can't raise a note's score
-  by editing it. A note with no record at all counts as written elsewhere.
-  An outside edit to a note with unsaved changes produces a conflict copy.
+  counts. This is deterministic, so every device reaches the same result,
+  and an agent can't raise a note's score by editing it. A note with no
+  record counts as written elsewhere. An outside edit to a note with
+  unsaved changes produces a conflict copy.
 - **Obsidian basics:** folder tree, `[[wikilinks]]` (incl. `[[Note|alias]]`,
   `[[Folder/Note]]`), linked mentions (backlinks), quick switcher
   (Ctrl/Cmd+O, creates on miss), full-text search, and a rendered
   reading view (Ctrl/Cmd+E).
-- **Sync model.** Signing in fetches only the vault's file list (one
-  request, `GET /v1/files`); a note is downloaded the first time it is
-  opened. Open notes save ~0.8s after typing stops (record first, then the
-  note). The list is re-checked on focus and every 30s, and only open notes
-  are re-downloaded when they change. Before every save the note's etag is
-  checked; if anything else changed the file meanwhile, nothing is
-  overwritten — the server's version keeps the name and the local one is
-  saved as `Name (conflict <date>).md`. Writes are conditional on the
-  server (`If-Match`), so a change slipping in between the check and the
-  write is refused rather than overwritten.
-- **Search and backlinks run on the server.** `note_index` is a derived,
-  disposable index — searchable words (a tsvector, not the text), title,
-  `[[link]]` targets and a short excerpt — that the vault server updates
-  after every change, whether it came through the API or straight onto
-  the disk (it watches the vault folder, so agents working on the droplet
-  are indexed too). Search is multilingual ('simple' config, prefix
-  matching); "Rebuild search index" regenerates a user's index.
-- **Setup:** run `supabase/schema.sql`, `supabase/accounts.sql`,
-  `supabase/search.sql`; deploy the vault server per `server/README.md`;
-  set `VITE_VAULT_API_URL` for the app.
+- **Sync model.** Signing in fetches only the vault's note list with
+  version numbers; a note is downloaded the first time it is opened, and
+  only open notes are re-fetched when their version changes (checked on
+  focus and every 30s). Saves happen ~0.8s after typing stops and name the
+  version they started from; if the note changed since, the server refuses
+  the save and nothing is overwritten — the server's version keeps the
+  name and the local one is saved as `Name (conflict <date>).md`.
+- **Search and backlinks run in the same database** as the notes, so they
+  are never out of date: Postgres full-text search ('simple' config,
+  multilingual, prefix matching while typing, title substrings) and a
+  `links` column for `[[link]]` targets.
+- **Setup:** see `server/README.md` (Postgres + vault server on the
+  droplet); run `supabase/schema.sql` and `supabase/accounts.sql` in
+  Supabase; set `VITE_VAULT_API_URL` for the app.
 
-Not yet: an access layer for agents (e.g. an MCP server over the vault
-with per-user tokens), an on-device cache of opened notes (IndexedDB),
+Not yet: an access layer for agents (an MCP server over the vault with
+per-user tokens, writing revisions as `agent:<name>`), semantic search
+(pgvector embeddings), per-user storage limits, account export/deletion,
+an on-device cache of opened notes (IndexedDB),
 realtime change push instead of the 30s list check, rewriting links when a
 note is renamed, attachments/images, settings synced through the vault.
 

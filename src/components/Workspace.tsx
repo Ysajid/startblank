@@ -5,7 +5,7 @@ import { computeBlankScore } from "../lib/blankScore";
 import { clearDraft, loadDraft, loadPrefs, resolveInitialTheme, savePrefs } from "../lib/storage";
 import { NOTE_EXT, noteTitle, parentOf, useVault, type SyncStatus } from "../lib/vaultSync";
 import { renderMarkdown, resolveLink } from "../lib/wikilinks";
-import { fetchBacklinks, rebuildIndex, searchNotes, type SearchHit } from "../lib/searchApi";
+import { fetchBacklinks, searchNotes, type SearchHit } from "../lib/searchApi";
 import type { FontName, ThemeName } from "../types";
 import { FileTree } from "./FileTree";
 import { FontSwitch } from "./FontSwitch";
@@ -252,16 +252,6 @@ export function Workspace({ session }: { session: Session }) {
     }
   }, [vault, selected, listed]);
 
-  async function rebuildSearch() {
-    setError(null);
-    try {
-      const count = await rebuildIndex();
-      setError(`Search index rebuilt from ${count} ${count === 1 ? "note" : "notes"}.`);
-    } catch {
-      setError("Couldn't rebuild the search index — is the vault server reachable?");
-    }
-  }
-
   const dirty = useMemo(() => new Set(Object.values(notes).filter((n) => n.dirty).map((n) => n.path)), [notes]);
   const previewHtml = useMemo(
     () => (reading && note ? renderMarkdown(note.body, paths) : ""),
@@ -395,14 +385,9 @@ export function Workspace({ session }: { session: Session }) {
                 />
               )}
             </nav>
-            <div className="flex flex-col gap-3 border-t border-[var(--rule)] p-3">
-              <div className="flex flex-col gap-3 lg:hidden">
-                <FontSwitch value={font} onChange={setFont} />
-                <ThemeSwitch value={theme} onChange={setTheme} />
-              </div>
-              <button type="button" className={`${headerButton} self-start`} onClick={rebuildSearch}>
-                Rebuild search index
-              </button>
+            <div className="flex flex-col gap-3 border-t border-[var(--rule)] p-3 lg:hidden">
+              <FontSwitch value={font} onChange={setFont} />
+              <ThemeSwitch value={theme} onChange={setTheme} />
             </div>
           </aside>
         ) : null}

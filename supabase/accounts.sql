@@ -2,9 +2,9 @@
 --
 -- Run this once in the Supabase SQL editor, after schema.sql.
 --
--- Notes themselves don't live in Supabase at all: they are Markdown files
--- on the vault server (see server/README.md). Supabase provides sign-in,
--- the published-snapshot table and the search index (search.sql).
+-- Notes don't live in Supabase at all: they are in Postgres on the vault
+-- server (see server/README.md), along with their search index. Supabase
+-- provides sign-in and the published-snapshot table only.
 --
 -- Make sure Authentication > Providers > Email is enabled (it is by
 -- default) and that the app's URL is in Authentication > URL Configuration

@@ -1,10 +1,9 @@
 # /etc/systemd/system/startblank-vault.service
 [Unit]
-Description=startblank vault server (notes as files)
-After=network-online.target
+Description=startblank vault server (notes in Postgres)
+After=network-online.target postgresql.service
 Wants=network-online.target
-# Don't start before the volume holding the notes is mounted.
-RequiresMountsFor=/mnt/vaults
+Requires=postgresql.service
 
 [Service]
 User=startblank
@@ -15,16 +14,12 @@ ExecStart=/usr/bin/node dist/index.js
 Restart=on-failure
 RestartSec=2
 
-# Files it creates are group-writable, so agents running as members of the
-# startblank group can edit notes too.
-UMask=0007
-
-# Hardening: the service can write to the vault and nowhere else.
+# Hardening: the service needs the network (Postgres, Supabase's public
+# keys) and nothing on disk.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/mnt/vaults/vaults
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true

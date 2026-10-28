@@ -1,16 +1,13 @@
 import { applyEdit, pasteRangesFromTags, tagsFromPasteRanges, type PasteRange } from "./provenance";
 import type { WritingStats } from "../types";
 
-// A note on the server is a plain Markdown file and nothing else, so agents,
-// AI services, search indexes and other editors can read and write it like
-// any other file.
-//
-// Its hand-writing record (the counts behind the Blank Score and which
-// characters were not written here) lives in a sidecar file,
-// `.startblank/record/<note path>.json`, together with a copy of the text
-// as the app last saved it. That copy is what keeps the record honest when
-// something else edits the note: the difference between it and the file is
-// exactly the text written outside startblank, and is marked as such.
+// A note is stored on the server as its Markdown text plus a hand-writing
+// record (the counts behind the Blank Score and which characters were not
+// written here), saved together in one row. The record also keeps a copy of
+// the text as the app last saved it. That copy is what keeps the record
+// honest when something else edits the note (an agent, another tool): the
+// difference between it and the current text is exactly what was written
+// outside startblank, and is marked as such.
 
 export interface NoteContent {
   body: string;
@@ -26,18 +23,6 @@ interface StoredRecord {
   pastedChars: number;
   pasted: [number, number][];
   body: string;
-}
-
-export const RECORD_DIR = ".startblank/record";
-
-export function recordPath(notePath: string): string {
-  return `${RECORD_DIR}/${notePath}.json`;
-}
-
-export function notePathFromRecord(path: string): string | null {
-  const prefix = `${RECORD_DIR}/`;
-  if (!path.startsWith(prefix) || !path.endsWith(".json")) return null;
-  return path.slice(prefix.length, -".json".length);
 }
 
 function isCount(n: unknown): n is number {

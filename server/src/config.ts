@@ -9,12 +9,11 @@ function required(name: string): string {
 export const config = {
   port: Number(process.env.PORT ?? 8787),
   host: process.env.HOST ?? "127.0.0.1",
-  // One folder per account lives under here: <root>/<user id>/<note path>.
-  vaultRoot: required("VAULT_ROOT"),
+  // The server connects as startblank_app (row-level security applies);
+  // migrations run separately as the database owner.
+  databaseUrl: required("DATABASE_URL"),
+  // Sign-in stays with Supabase: tokens are verified against this project.
   supabaseUrl: required("SUPABASE_URL").replace(/\/$/, ""),
-  // Used only to write the search index (public.note_index): the project's
-  // secret key (sb_secret_…) or legacy service_role key.
-  serviceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
   // Only for projects still on the legacy shared JWT secret; projects using
   // JWT signing keys are verified against their published JWKS instead.
   jwtSecret: process.env.SUPABASE_JWT_SECRET || null,
@@ -22,8 +21,5 @@ export const config = {
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean),
-  maxFileBytes: Number(process.env.MAX_FILE_BYTES ?? 5 * 1024 * 1024),
-  // Watch the vault folder so files written by anything else on this
-  // machine (agents, scripts, rsync) get indexed too.
-  watch: process.env.WATCH !== "0",
+  maxNoteBytes: Number(process.env.MAX_NOTE_BYTES ?? 5 * 1024 * 1024),
 };
