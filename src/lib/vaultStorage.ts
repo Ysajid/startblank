@@ -1,14 +1,12 @@
 import { supabase } from "./supabase";
 
-// Notes live in Postgres behind the vault server (server/ in this repo, on
-// a DigitalOcean droplet). Each note is one row: its Markdown text and its
-// hand-writing record, saved together. Every request carries the user's
-// Supabase access token, and the database itself only ever shows a user
-// their own rows.
+// Notes live in Supabase Postgres (see supabase/vault.sql). Each note is one
+// row: its Markdown text and its hand-writing record, saved together.
+// Row-level security keeps every user to their own rows, and note text is
+// written only through save_note(), which refuses a save that starts from
+// an outdated version and records the revision.
 //
 // Paths are vault-relative ("Ideas/On walking.md"); folders are prefixes.
-
-const API = (import.meta.env.VITE_VAULT_API_URL ?? "").replace(/\/$/, "");
 
 export interface VaultListing {
   notes: { path: string; version: number }[];
@@ -34,45 +32,38 @@ export class NoteChangedError extends Error {}
 
 export class NotFoundError extends Error {}
 
-export class VaultRequestError extends Error {
-  constructor(
-    readonly status: number,
-    message: string
-  ) {
-    super(message);
-  }
+export class AlreadyExistsError extends Error {}
+
+interface PgError {
+  code?: string;
+  message: string;
 }
 
-async function request<T>(method: string, route: string, json?: unknown): Promise<T> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new VaultRequestError(401, "signed out");
-  const res = await fetch(`${API}${route}`, {
-    method,
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(json === undefined ? {} : { "Content-Type": "application/json" }),
-    },
-    body: json === undefined ? undefined : JSON.stringify(json),
-  });
-  if (res.status === 412) throw new NoteChangedError(route);
-  if (res.status === 404) throw new NotFoundError(route);
-  if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    throw new VaultRequestError(res.status, detail?.error ?? `vault server answered ${res.status}`);
-  }
-  return res.json();
+function fail(error: PgError): never {
+  if (error.code === "P0002") throw new NotFoundError(error.message);
+  if (error.code === "23505") throw new AlreadyExistsError("Something with that name already exists.");
+  throw new Error(error.message);
 }
 
-const q = (path: string) => encodeURIComponent(path);
-
-export function listVault(): Promise<VaultListing> {
-  return request("GET", "/v1/vault");
+export async function listVault(): Promise<VaultListing> {
+  const { data, error } = await supabase.rpc("list_vault");
+  if (error) fail(error);
+  const listing = data as { notes: { path: string; version: number | string }[]; folders: string[] };
+  return {
+    notes: listing.notes.map((n) => ({ path: n.path, version: Number(n.version) })),
+    folders: listing.folders,
+  };
 }
 
-export function readNote(path: string): Promise<StoredNote> {
-  return request("GET", `/v1/note?path=${q(path)}`);
+export async function readNote(path: string): Promise<StoredNote> {
+  const { data, error } = await supabase
+    .from("notes")
+    .select("body, record, version")
+    .eq("path", path)
+    .maybeSingle();
+  if (error) fail(error);
+  if (!data) throw new NotFoundError(path);
+  return { body: data.body, record: data.record, version: Number(data.version) };
 }
 
 // Saves text and record together, only if the note is still at
@@ -84,35 +75,52 @@ export async function saveNote(
   record: string | null,
   baseVersion: number | null
 ): Promise<number> {
-  return (await request<{ version: number }>("PUT", `/v1/note?path=${q(path)}`, { body, record, baseVersion }))
-    .version;
+  const { data, error } = await supabase.rpc("save_note", {
+    p_path: path,
+    p_body: body,
+    p_record: record,
+    p_base_version: baseVersion,
+  });
+  if (error) fail(error);
+  if (data === null) throw new NoteChangedError(path);
+  return Number(data);
 }
 
 export async function moveNote(from: string, to: string): Promise<void> {
-  await request("POST", "/v1/notes/move", { from, to });
+  const { error } = await supabase.rpc("move_note", { p_from: from, p_to: to });
+  if (error) fail(error);
 }
 
 export async function deleteNotes(paths: string[]): Promise<void> {
-  if (paths.length > 0) await request("POST", "/v1/notes/delete", { paths });
+  if (paths.length === 0) return;
+  const { error } = await supabase.from("notes").delete().in("path", paths);
+  if (error) fail(error);
 }
 
 export async function createFolder(path: string): Promise<void> {
-  await request("POST", "/v1/folders", { path });
+  const { error } = await supabase.from("folders").upsert({ path }, { onConflict: "owner_id,path", ignoreDuplicates: true });
+  if (error) fail(error);
 }
 
 // Moves a folder with everything in it, in one step on the server.
 export async function moveFolder(from: string, to: string): Promise<void> {
-  await request("POST", "/v1/folders/move", { from, to });
+  const { error } = await supabase.rpc("move_folder", { p_from: from, p_to: to });
+  if (error) fail(error);
 }
 
 export async function deleteFolder(path: string): Promise<void> {
-  await request("POST", "/v1/folders/delete", { path });
+  const { error } = await supabase.rpc("delete_folder", { p_path: path });
+  if (error) fail(error);
 }
 
-export function searchNotes(query: string): Promise<SearchHit[]> {
-  return request("GET", `/v1/search?q=${q(query)}`);
+export async function searchNotes(query: string): Promise<SearchHit[]> {
+  const { data, error } = await supabase.rpc("search_notes", { p_query: query });
+  if (error) fail(error);
+  return (data ?? []) as SearchHit[];
 }
 
-export function fetchBacklinks(path: string): Promise<string[]> {
-  return request("GET", `/v1/backlinks?path=${q(path)}`);
+export async function fetchBacklinks(path: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc("note_backlinks", { p_path: path });
+  if (error) fail(error);
+  return (data ?? []) as string[];
 }

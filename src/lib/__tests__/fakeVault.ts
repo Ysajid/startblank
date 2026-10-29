@@ -1,6 +1,6 @@
-// An in-memory stand-in for the vault server (src/lib/vaultStorage.ts),
-// with the same rules: versioned saves that refuse to overwrite a newer
-// version, folders as path prefixes.
+// An in-memory stand-in for the vault API (src/lib/vaultStorage.ts, backed
+// by supabase/vault.sql), with the same rules: versioned saves that refuse
+// to overwrite a newer version, folders as path prefixes.
 
 export class NoteChangedError extends Error {}
 export class NotFoundError extends Error {}

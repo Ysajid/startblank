@@ -9,15 +9,17 @@ it was written by hand, and pasted text stays visibly marked.
 
 - **Accounts, synced vaults.** Sign in (Supabase Auth, email + password) and
   the same vault is on every device.
-- **Notes live in Postgres on our own server.** The vault server
-  (`server/`, on a DigitalOcean droplet) keeps each note as one row — its
-  Markdown text and its hand-writing record, saved together — plus folders
-  and a revision history tagged by author (`app` or `agent:<name>`).
-  Isolation is enforced by the database: the server connects as a role
-  under row-level security, pinned per request to the signed-in user.
-  Supabase only provides sign-in and published share links (§4.4).
-  (An earlier version stored notes as files on disk; dropped in favour of
-  the database once agents were to reach notes only through the API.)
+- **Notes live in Supabase Postgres** (`supabase/vault.sql`): one row per
+  note — its Markdown text and its hand-writing record, saved together —
+  plus folders and a revision history tagged by author (`app`, later
+  `agent:<name>`). Row-level security keeps each user to their own rows.
+  Note text is written only through `save_note()`, which refuses a save
+  starting from an outdated version and records the revision, so a
+  modified client can't skip either rule. Paths are checked by the table
+  itself. (Earlier versions stored notes as files — in Supabase Storage,
+  then on a droplet — and then in Postgres on a droplet; the schema is the
+  same as that last one, so moving to self-hosted Postgres later is a
+  matter of where it runs.)
 - **Notes stay plain Markdown.** Paths look like file paths
   (`Ideas/On walking.md`), so a vault exports cleanly as a folder of
   Markdown files, and agents read and write ordinary Markdown.
@@ -41,13 +43,12 @@ it was written by hand, and pasted text stays visibly marked.
   version they started from; if the note changed since, the server refuses
   the save and nothing is overwritten — the server's version keeps the
   name and the local one is saved as `Name (conflict <date>).md`.
-- **Search and backlinks run in the same database** as the notes, so they
-  are never out of date: Postgres full-text search ('simple' config,
+- **Search and backlinks run in the same database** as the notes (SQL
+  functions in `vault.sql`), so they are never out of date: Postgres full-text search ('simple' config,
   multilingual, prefix matching while typing, title substrings) and a
   `links` column for `[[link]]` targets.
-- **Setup:** see `server/README.md` (Postgres + vault server on the
-  droplet); run `supabase/schema.sql` and `supabase/accounts.sql` in
-  Supabase; set `VITE_VAULT_API_URL` for the app.
+- **Setup:** run `supabase/schema.sql`, `supabase/accounts.sql`, then
+  `supabase/vault.sql` in the Supabase SQL editor. No server of our own.
 
 Not yet: an access layer for agents (an MCP server over the vault with
 per-user tokens, writing revisions as `agent:<name>`), semantic search
