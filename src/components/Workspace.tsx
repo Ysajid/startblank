@@ -11,6 +11,7 @@ import { outline, type Heading } from "../lib/outline";
 import { fetchBacklinks, searchNotes, type SearchHit } from "../lib/searchApi";
 import type { FontName, ThemeName } from "../types";
 import { FileTree } from "./FileTree";
+import { ProfilePage } from "./ProfilePage";
 import type { EditorControl } from "./NoteEditor";
 import { FontSwitch } from "./FontSwitch";
 import { FONT_CLASS } from "../fonts";
@@ -22,6 +23,8 @@ import { Wordmark } from "./Wordmark";
 // The editor (CodeMirror) is most of the app's weight; load it only when a
 // note is opened, so sign-in and published pages stay light.
 const NoteEditor = lazy(() => import("./NoteEditor").then((m) => ({ default: m.NoteEditor })));
+
+const PROFILE_HASH = "#profile";
 
 const SYNC_LABEL: Record<SyncStatus, string> = {
   loading: "Loading vault…",
@@ -67,6 +70,10 @@ export function Workspace({ session }: { session: Session }) {
     return linked ? { path: linked } : null;
   });
   const [linkCopied, setLinkCopied] = useState(false);
+  // The profile page has its own address (#profile) so Back returns to notes.
+  const [page, setPage] = useState<"notes" | "profile">(() =>
+    window.location.hash === PROFILE_HASH ? "profile" : "notes"
+  );
   const [reading, setReading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -109,19 +116,25 @@ export function Workspace({ session }: { session: Session }) {
     setSelected(null);
   }, [loaded, selected, notes]);
 
-  // The address bar always shows the open note's link. Opening a note adds
-  // a history entry (see open); renames and the like just correct it.
+  // The address bar always shows the open note's link (or the profile's).
+  // Opening a note adds a history entry (see open); renames and the like
+  // just correct it.
   useEffect(() => {
-    const hash = selected ? noteHash(selected) : "";
+    const hash = page === "profile" ? PROFILE_HASH : selected ? noteHash(selected) : "";
     if (window.location.hash !== hash) {
       history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}${hash}`);
     }
     setLinkCopied(false);
-  }, [selected]);
+  }, [selected, page]);
 
-  // Back/forward, or a note link pasted into the address bar.
+  // Back/forward, or a link pasted into the address bar.
   useEffect(() => {
     function onHashChange() {
+      if (window.location.hash === PROFILE_HASH) {
+        setPage("profile");
+        return;
+      }
+      setPage("notes");
       const linked = readNoteHash();
       if (!linked) return;
       setSelected(linked);
@@ -133,6 +146,7 @@ export function Workspace({ session }: { session: Session }) {
 
   const open = useCallback((path: string) => {
     if (window.location.hash !== noteHash(path)) history.pushState(null, "", noteHash(path));
+    setPage("notes");
     setSelected(path);
     setReading(false);
     if (window.innerWidth < 768) setSidebarOpen(false);
@@ -284,6 +298,16 @@ export function Workspace({ session }: { session: Session }) {
     createNote(folder, target.slice(folder ? folder.length + 1 : 0));
   }
 
+  function openProfile() {
+    if (window.location.hash !== PROFILE_HASH) history.pushState(null, "", PROFILE_HASH);
+    setPage("profile");
+  }
+
+  function closeProfile() {
+    history.pushState(null, "", selected ? noteHash(selected) : window.location.pathname);
+    setPage("notes");
+  }
+
   async function signOut() {
     if (guest && !window.confirm("You're writing without an account. Signing out loses these notes for good. Sign out?")) {
       return;
@@ -400,7 +424,7 @@ export function Workspace({ session }: { session: Session }) {
             <ThemeSwitch value={theme} onChange={setTheme} />
             <div className="h-4 w-px bg-[var(--rule)]" />
           </div>
-          {note && !guest ? (
+          {note && !guest && page === "notes" ? (
             <button
               type="button"
               onClick={() => setPublishOpen(true)}
@@ -409,6 +433,14 @@ export function Workspace({ session }: { session: Session }) {
               Publish
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={page === "profile" ? closeProfile : openProfile}
+            aria-pressed={page === "profile"}
+            className={headerButton}
+          >
+            Profile
+          </button>
           <button type="button" onClick={signOut} className={headerButton} title={session.user.email ?? ""}>
             {guest ? "Guest · Sign out" : "Sign out"}
           </button>
@@ -429,6 +461,22 @@ export function Workspace({ session }: { session: Session }) {
       ) : null}
 
       <div className="flex min-h-0 flex-1">
+        {page === "profile" ? (
+          <ProfilePage
+            session={session}
+            guest={guest}
+            theme={theme}
+            onTheme={setTheme}
+            font={font}
+            onFont={setFont}
+            showPasted={showPasted}
+            onShowPasted={setShowPasted}
+            showToc={showToc}
+            onShowToc={setShowToc}
+            onClose={closeProfile}
+          />
+        ) : (
+          <>
         {sidebarOpen ? (
           <aside className="flex w-full shrink-0 flex-col border-r border-[var(--rule)] bg-[var(--surface)] md:w-72">
             <div className="flex flex-col gap-3 border-b border-[var(--rule)] p-3">
@@ -726,6 +774,8 @@ export function Workspace({ session }: { session: Session }) {
             </section>
           </aside>
         ) : null}
+          </>
+        )}
       </div>
 
       {switcherOpen ? (
