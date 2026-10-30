@@ -115,3 +115,21 @@ describe("VaultSync across two devices", async () => {
     expect(db.get(p)!.body).toBe("first and more");
   });
 });
+
+describe("VaultSync.importNotes", async () => {
+  const { VaultSync } = await import("../vaultSync");
+
+  it("saves imported notes, numbering names that are taken, as not written here", async () => {
+    const a = new VaultSync();
+    await a.start();
+    a.createNote("Ideas/Walk.md");
+    const created = a.importNotes([
+      { path: "Ideas/Walk.md", body: "imported" },
+      { path: "Inbox.md", body: "hi" },
+    ]);
+    expect(created).toEqual(["Ideas/Walk 2.md", "Inbox.md"]);
+    await a.flushNow();
+    expect(db.get("Ideas/Walk 2.md")!.body).toBe("imported");
+    expect(db.get("Inbox.md")!.record).toContain('"pastedChars":2');
+  });
+});

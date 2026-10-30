@@ -433,6 +433,20 @@ export class VaultSync {
     return target;
   }
 
+  // Adds notes brought in from elsewhere (a zip import). They have no
+  // record, so — as with any outside edit — every character counts as not
+  // written here. Names that are taken get a number. Returns the new paths.
+  importNotes(notes: { path: string; body: string }[]): string[] {
+    const created = notes.map(({ path, body }) => {
+      const target = this.uniquePath(path);
+      this.entries.set(target, unsaved(loadNote(body, null).content));
+      this.scheduleSave(target, 0);
+      return target;
+    });
+    this.emit();
+    return created;
+  }
+
   pathExists(path: string): boolean {
     return this.entries.has(path) || this.snapshot.folders.includes(path);
   }

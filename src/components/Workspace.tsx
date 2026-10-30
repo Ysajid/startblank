@@ -5,6 +5,7 @@ import { computeBlankScore } from "../lib/blankScore";
 import { clearDraft, loadDraft, loadPrefs, resolveInitialTheme, savePrefs } from "../lib/storage";
 import { NOTE_EXT, noteTitle, parentOf, useVault, type SyncStatus } from "../lib/vaultSync";
 import { renderMarkdown, resolveLink } from "../lib/wikilinks";
+import { readMarkdownZip } from "../lib/importZip";
 import { fetchBacklinks, searchNotes, type SearchHit } from "../lib/searchApi";
 import type { FontName, ThemeName } from "../types";
 import { FileTree } from "./FileTree";
@@ -60,6 +61,7 @@ export function Workspace({ session }: { session: Session }) {
   const [font, setFont] = useState<FontName>(() => loadPrefs().font);
   const [error, setError] = useState<string | null>(null);
   const importedDraft = useRef(false);
+  const zipInput = useRef<HTMLInputElement>(null);
 
   const paths = useMemo(() => Object.keys(notes), [notes]);
   const listed = selected ? notes[selected] : undefined;
@@ -169,6 +171,35 @@ export function Workspace({ session }: { session: Session }) {
       return;
     }
     run(vault.createFolder(target));
+  }
+
+  async function importZip(file: File) {
+    setError(null);
+    let parsed;
+    try {
+      parsed = readMarkdownZip(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      setError(`“${file.name}” couldn't be read as a zip file.`);
+      return;
+    }
+    if (parsed.notes.length === 0) {
+      setError(`No Markdown notes found in “${file.name}”.`);
+      return;
+    }
+    // Guests have no folders, so everything lands at the top level.
+    const notesToAdd = guest
+      ? parsed.notes.map((n) => ({ ...n, path: n.path.slice(n.path.lastIndexOf("/") + 1) }))
+      : parsed.notes;
+    const created = vault.importNotes(notesToAdd);
+    if (!guest) {
+      for (const folder of parsed.emptyFolders) {
+        if (!vault.pathExists(folder)) run(vault.createFolder(folder));
+      }
+    }
+    open(created[0]);
+    if (parsed.skipped > 0) {
+      setError(`Imported ${created.length} notes; skipped ${parsed.skipped} files that aren't Markdown.`);
+    }
   }
 
   function renameFromTitle(value: string) {
@@ -345,6 +376,20 @@ export function Workspace({ session }: { session: Session }) {
                     + Folder
                   </button>
                 )}
+                <button type="button" className={headerButton} onClick={() => zipInput.current?.click()}>
+                  Import
+                </button>
+                <input
+                  ref={zipInput}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = ""; // let the same file be picked again
+                    if (file) importZip(file);
+                  }}
+                />
                 <button type="button" className={`${headerButton} ml-auto`} onClick={() => setSwitcherOpen(true)}>
                   Open ⌘O
                 </button>
