@@ -84,6 +84,17 @@ export function FileTree({
     };
   }, [reveal, listed]);
 
+  const allFolders: string[] = [];
+  const collect = (node: FolderNode) => {
+    for (const folder of node.folders) {
+      allFolders.push(folder.path);
+      collect(folder);
+    }
+  };
+  collect(tree);
+  const allCollapsed = allFolders.length > 0 && allFolders.every((f) => collapsed.has(f));
+  const noneCollapsed = allFolders.every((f) => !collapsed.has(f));
+
   function toggle(path: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -169,8 +180,30 @@ export function FileTree({
   }
 
   return (
-    <ul ref={list} className="py-2">
-      {renderFolder(tree, 0)}
-    </ul>
+    <>
+      {allFolders.length > 0 ? (
+        <div className="flex gap-4 px-4 pt-3">
+          <button
+            type="button"
+            className={`${rowAction} disabled:opacity-40`}
+            disabled={allCollapsed}
+            onClick={() => setCollapsed(new Set(allFolders))}
+          >
+            Collapse all
+          </button>
+          <button
+            type="button"
+            className={`${rowAction} disabled:opacity-40`}
+            disabled={noneCollapsed}
+            onClick={() => setCollapsed(new Set())}
+          >
+            Expand all
+          </button>
+        </div>
+      ) : null}
+      <ul ref={list} className="py-2">
+        {renderFolder(tree, 0)}
+      </ul>
+    </>
   );
 }
