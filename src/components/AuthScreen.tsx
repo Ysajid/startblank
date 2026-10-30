@@ -35,6 +35,14 @@ export function AuthScreen() {
     setBusy(false);
   }
 
+  async function startAsGuest() {
+    setBusy(true);
+    setMessage(null);
+    const { error } = await supabase.auth.signInAnonymously();
+    if (error) setMessage(error.message);
+    setBusy(false);
+  }
+
   const inputClass =
     "w-full border border-[var(--rule)] bg-transparent px-3 py-2 font-write-mono text-[13px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none";
   const labelClass = "font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]";
@@ -104,6 +112,20 @@ export function AuthScreen() {
         >
           {mode === "sign-in" ? "New here? Create an account" : "Have an account? Sign in"}
         </button>
+
+        <div className="mt-10 border-t border-[var(--rule)] pt-6">
+          <button
+            type="button"
+            onClick={startAsGuest}
+            disabled={busy}
+            className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)] hover:text-[var(--fg)] disabled:opacity-40"
+          >
+            Start writing without an account
+          </button>
+          <p className="mt-2 text-[12px] leading-relaxed text-[var(--fg-muted)]">
+            Notes stay in this browser's session. Folders and publishing need an account.
+          </p>
+        </div>
       </main>
     </div>
   );

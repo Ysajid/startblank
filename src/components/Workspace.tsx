@@ -44,6 +44,9 @@ function join(folder: string, name: string) {
 
 export function Workspace({ session }: { session: Session }) {
   const userId = session.user.id;
+  // Guests (anonymous sign-ins) keep their notes at the top level and can't
+  // publish; supabase/guests.sql enforces the same on the server.
+  const guest = session.user.is_anonymous === true;
   const { vault, snapshot } = useVault(userId);
   const { notes, folders, versions, status, notice } = snapshot;
 
@@ -90,9 +93,9 @@ export function Workspace({ session }: { session: Session }) {
   const createNote = useCallback(
     (folder: string, title = "Untitled") => {
       const name = cleanName(title) ?? "Untitled";
-      open(vault.createNote(join(folder, `${name}${NOTE_EXT}`)));
+      open(vault.createNote(join(guest ? "" : folder, `${name}${NOTE_EXT}`)));
     },
-    [vault, open]
+    [vault, open, guest]
   );
 
   // Carry over a draft written in the old single-page version of the app,
@@ -187,6 +190,9 @@ export function Workspace({ session }: { session: Session }) {
   }
 
   async function signOut() {
+    if (guest && !window.confirm("You're writing without an account. Signing out loses these notes for good. Sign out?")) {
+      return;
+    }
     try {
       await vault.flushNow();
     } catch {
@@ -287,7 +293,7 @@ export function Workspace({ session }: { session: Session }) {
             <ThemeSwitch value={theme} onChange={setTheme} />
             <div className="h-4 w-px bg-[var(--rule)]" />
           </div>
-          {note ? (
+          {note && !guest ? (
             <button
               type="button"
               onClick={() => setPublishOpen(true)}
@@ -297,7 +303,7 @@ export function Workspace({ session }: { session: Session }) {
             </button>
           ) : null}
           <button type="button" onClick={signOut} className={headerButton} title={session.user.email ?? ""}>
-            Sign out
+            {guest ? "Guest · Sign out" : "Sign out"}
           </button>
         </div>
       </header>
@@ -334,9 +340,11 @@ export function Workspace({ session }: { session: Session }) {
                 >
                   + Note
                 </button>
-                <button type="button" className={headerButton} onClick={newFolder}>
-                  + Folder
-                </button>
+                {guest ? null : (
+                  <button type="button" className={headerButton} onClick={newFolder}>
+                    + Folder
+                  </button>
+                )}
                 <button type="button" className={`${headerButton} ml-auto`} onClick={() => setSwitcherOpen(true)}>
                   Open ⌘O
                 </button>
@@ -522,7 +530,7 @@ export function Workspace({ session }: { session: Session }) {
         />
       ) : null}
 
-      {note ? (
+      {note && !guest ? (
         <PublishPanel
           open={publishOpen}
           onClose={() => setPublishOpen(false)}
