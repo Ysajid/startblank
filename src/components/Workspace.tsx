@@ -7,9 +7,11 @@ import { NOTE_EXT, noteTitle, parentOf, useVault, type SyncStatus } from "../lib
 import { renderMarkdown, resolveLink } from "../lib/wikilinks";
 import { readMarkdownZip } from "../lib/importZip";
 import { noteHash, noteUrl, readNoteHash } from "../lib/noteLink";
+import { outline, type Heading } from "../lib/outline";
 import { fetchBacklinks, searchNotes, type SearchHit } from "../lib/searchApi";
 import type { FontName, ThemeName } from "../types";
 import { FileTree } from "./FileTree";
+import type { EditorControl } from "./NoteEditor";
 import { FontSwitch } from "./FontSwitch";
 import { FONT_CLASS } from "../fonts";
 import { PublishPanel } from "./PublishPanel";
@@ -73,6 +75,10 @@ export function Workspace({ session }: { session: Session }) {
   const [theme, setTheme] = useState<ThemeName>(resolveInitialTheme);
   const [font, setFont] = useState<FontName>(() => loadPrefs().font);
   const [showPasted, setShowPasted] = useState(() => loadPrefs().showPasted);
+  const [showToc, setShowToc] = useState(() => loadPrefs().showToc);
+  const [detailsOpen, setDetailsOpen] = useState(() => window.innerWidth >= 1024);
+  const editorControl = useRef<EditorControl | null>(null);
+  const articleRef = useRef<HTMLElement>(null);
   const [error, setError] = useState<string | null>(null);
   const importedDraft = useRef(false);
   const zipInput = useRef<HTMLInputElement>(null);
@@ -88,8 +94,8 @@ export function Workspace({ session }: { session: Session }) {
   }, [theme]);
 
   useEffect(() => {
-    savePrefs({ theme, font, showPasted });
-  }, [theme, font, showPasted]);
+    savePrefs({ theme, font, showPasted, showToc });
+  }, [theme, font, showPasted, showToc]);
 
   useEffect(() => {
     if (selected) localStorage.setItem(lastNoteKey(userId), selected);
@@ -356,6 +362,18 @@ export function Workspace({ session }: { session: Session }) {
   const charCount = note?.body.length ?? 0;
   const wordCount = !note || note.body.trim() === "" ? 0 : note.body.trim().split(/\s+/).length;
   const score = note ? computeBlankScore(note.stats, charCount).score : 0;
+  const noteBody = note?.body;
+  const headings = useMemo(() => (noteBody === undefined ? [] : outline(noteBody)), [noteBody]);
+
+  // Contents entries go to the heading in whichever view is showing.
+  function jumpToHeading(heading: Heading, index: number) {
+    if (reading) {
+      articleRef.current?.querySelectorAll("h1, h2, h3, h4, h5, h6")[index]?.scrollIntoView({ block: "start" });
+    } else {
+      editorControl.current?.jumpTo(heading.from);
+    }
+    if (window.innerWidth < 1024) setDetailsOpen(false);
+  }
 
   return (
     <div className="flex h-screen flex-col">
@@ -527,6 +545,15 @@ export function Workspace({ session }: { session: Session }) {
                   <button type="button" className={headerButton} onClick={copyLink} title={noteUrl(selected)}>
                     {linkCopied ? "Copied" : "Link"}
                   </button>
+                  <button
+                    type="button"
+                    className={headerButton}
+                    onClick={() => setDetailsOpen((o) => !o)}
+                    aria-expanded={detailsOpen}
+                    title="Stats and contents"
+                  >
+                    Details
+                  </button>
                   <button type="button" className={headerButton} onClick={() => setReading((r) => !r)}>
                     {reading ? "Write" : "Read"}
                   </button>
@@ -544,6 +571,7 @@ export function Workspace({ session }: { session: Session }) {
               <div className="mt-8 flex-1">
                 {reading ? (
                   <article
+                    ref={articleRef}
                     className={`${FONT_CLASS[font]} note-preview`}
                     onClick={(event) => {
                       const link = (event.target as HTMLElement).closest("a");
@@ -563,6 +591,7 @@ export function Workspace({ session }: { session: Session }) {
                       font={font}
                       showPasted={showPasted}
                       paths={paths}
+                      controlRef={editorControl}
                       onFollowLink={followLink}
                       onChange={(body, stats, ranges) => vault.updateNote(selected, body, stats, ranges)}
                     />
@@ -591,33 +620,6 @@ export function Workspace({ session }: { session: Session }) {
                 ) : null}
               </section>
 
-              <footer className="sticky bottom-0 -mx-6 flex items-end justify-between border-t border-[var(--rule)] bg-[var(--bg)] px-6 py-3">
-                <div>
-                  <div className="font-write-mono text-xl leading-none tabular-nums text-[var(--fg)]">{charCount}</div>
-                  <div className="mt-1 font-write-mono text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">
-                    characters · {wordCount} {wordCount === 1 ? "word" : "words"}
-                  </div>
-                </div>
-                <div className="self-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowPasted((s) => !s)}
-                    aria-pressed={showPasted}
-                    title="Highlighting only — pasted text counts toward the Blank Score either way"
-                    className={headerButton}
-                  >
-                    Pasted: {showPasted ? "shown" : "hidden"}
-                  </button>
-                </div>
-                <div className="text-right">
-                  <div className="font-write-mono text-xl leading-none tabular-nums text-[var(--fg)]">
-                    {charCount === 0 || note.imported ? "—" : score.toFixed(1)}
-                  </div>
-                  <div className="mt-1 font-write-mono text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">
-                    {note.imported ? "imported · no blank score" : "blank score"}
-                  </div>
-                </div>
-              </footer>
             </div>
           ) : listed ? (
             <p className="mx-auto max-w-[720px] px-6 pt-10 font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">
@@ -646,6 +648,84 @@ export function Workspace({ session }: { session: Session }) {
             </div>
           )}
         </main>
+
+        {note && selected && detailsOpen ? (
+          <aside className="fixed inset-y-0 right-0 z-10 flex w-[min(288px,100%)] flex-col overflow-auto border-l border-[var(--rule)] bg-[var(--surface)] lg:static lg:z-auto lg:w-64 lg:shrink-0">
+            <div className="flex items-center justify-between border-b border-[var(--rule)] px-5 py-3 lg:hidden">
+              <span className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">Details</span>
+              <button type="button" className={headerButton} onClick={() => setDetailsOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <section className="border-b border-[var(--rule)] p-5">
+              <div className="font-write-mono text-3xl leading-none tabular-nums text-[var(--fg)]">
+                {charCount === 0 || note.imported ? "—" : score.toFixed(1)}
+              </div>
+              <div className="mt-2 font-write-mono text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">
+                {note.imported ? "imported · no blank score" : "blank score"}
+              </div>
+              <dl className="mt-5 grid grid-cols-2 gap-y-2 font-write-mono text-[12px]">
+                <dt className="text-[var(--fg-muted)]">Words</dt>
+                <dd className="text-right tabular-nums">{wordCount}</dd>
+                <dt className="text-[var(--fg-muted)]">Characters</dt>
+                <dd className="text-right tabular-nums">{charCount}</dd>
+                {note.imported ? null : (
+                  <>
+                    <dt className="text-[var(--fg-muted)]">Pasted</dt>
+                    <dd className="text-right tabular-nums">{note.stats.pastedChars}</dd>
+                  </>
+                )}
+              </dl>
+              <button
+                type="button"
+                onClick={() => setShowPasted((s) => !s)}
+                aria-pressed={showPasted}
+                title="Highlighting only — pasted text counts toward the Blank Score either way"
+                className={`${headerButton} mt-4`}
+              >
+                Highlight pasted: {showPasted ? "on" : "off"}
+              </button>
+            </section>
+
+            <section className="p-5">
+              <div className="flex items-center justify-between">
+                <h2 className="font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">Contents</h2>
+                <button
+                  type="button"
+                  onClick={() => setShowToc((s) => !s)}
+                  aria-expanded={showToc}
+                  className={headerButton}
+                >
+                  {showToc ? "Hide" : "Show"}
+                </button>
+              </div>
+              {showToc ? (
+                headings.length === 0 ? (
+                  <p className="mt-3 text-[12px] leading-relaxed text-[var(--fg-muted)]">
+                    No headings yet. Start a line with # to add one.
+                  </p>
+                ) : (
+                  <ul className="mt-3 flex flex-col gap-1.5">
+                    {headings.map((heading, i) => (
+                      <li key={`${heading.from}`} style={{ paddingLeft: (heading.level - 1) * 12 }}>
+                        <button
+                          type="button"
+                          onClick={() => jumpToHeading(heading, i)}
+                          className={`text-left text-[13px] leading-snug hover:text-[var(--accent)] ${
+                            heading.level === 1 ? "text-[var(--fg)]" : "text-[var(--fg-muted)]"
+                          }`}
+                        >
+                          {heading.text}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : null}
+            </section>
+          </aside>
+        ) : null}
       </div>
 
       {switcherOpen ? (

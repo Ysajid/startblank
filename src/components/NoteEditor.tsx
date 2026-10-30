@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -23,6 +23,12 @@ const markdownStyle = HighlightStyle.define([
   { tag: t.quote, color: "var(--fg-muted)" },
 ]);
 
+// What the rest of the workspace can ask of an open editor.
+export interface EditorControl {
+  // Puts the cursor at `pos` and scrolls it to the top (the table of contents).
+  jumpTo: (pos: number) => void;
+}
+
 // The writing surface for one note: a live-preview Markdown editor that
 // owns the note's hand-writing record while open. Mount it with a `key` per
 // note (and per server version) so switching notes starts from that note's
@@ -32,6 +38,7 @@ export function NoteEditor({
   font,
   showPasted,
   paths,
+  controlRef,
   onFollowLink,
   onChange,
 }: {
@@ -39,6 +46,7 @@ export function NoteEditor({
   font: FontName;
   showPasted: boolean;
   paths: string[];
+  controlRef?: MutableRefObject<EditorControl | null>;
   onFollowLink: (target: string) => void;
   onChange: (body: string, stats: WritingStats, pasteRanges: PasteRange[]) => void;
 }) {
@@ -77,7 +85,22 @@ export function NoteEditor({
       }),
     });
     view.focus();
-    return () => view.destroy();
+    if (controlRef) {
+      controlRef.current = {
+        jumpTo(pos) {
+          const at = Math.min(pos, view.state.doc.length);
+          view.dispatch({
+            selection: { anchor: at },
+            effects: EditorView.scrollIntoView(at, { y: "start", yMargin: 32 }),
+          });
+          view.focus();
+        },
+      };
+    }
+    return () => {
+      if (controlRef) controlRef.current = null;
+      view.destroy();
+    };
     // Only on mount: afterwards the editor is the source of truth.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

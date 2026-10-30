@@ -15,9 +15,11 @@ export interface Prefs {
   font: FontName;
   // Whether pasted text is highlighted while writing. It's counted either way.
   showPasted: boolean;
+  // Whether the details panel lists the note's headings.
+  showToc: boolean;
 }
 
-const DEFAULT_PREFS: Prefs = { theme: "light", font: "typewriter", showPasted: true };
+const DEFAULT_PREFS: Prefs = { theme: "light", font: "typewriter", showPasted: true, showToc: true };
 
 export function loadDraft(): Draft | null {
   const raw = localStorage.getItem(DRAFT_KEY);
@@ -52,6 +54,7 @@ export function loadPrefs(): Prefs {
       theme: parsed.theme ?? DEFAULT_PREFS.theme,
       font: parsed.font ?? DEFAULT_PREFS.font,
       showPasted: parsed.showPasted ?? DEFAULT_PREFS.showPasted,
+      showToc: parsed.showToc ?? DEFAULT_PREFS.showToc,
     };
   } catch {
     return DEFAULT_PREFS;
