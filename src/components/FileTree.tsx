@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { baseName, noteTitle, parentOf } from "../lib/vaultSync";
 
 interface FolderNode {
@@ -44,16 +44,45 @@ export function FileTree({
   notes,
   dirty,
   selected,
+  reveal,
   actions,
 }: {
   folders: string[];
   notes: string[];
   dirty: Set<string>;
   selected: string | null;
+  // A note to show: its folders are opened, it's scrolled to and flashed.
+  // A new object each time, so the same note can be located again.
+  reveal: { path: string } | null;
   actions: TreeActions;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [flashing, setFlashing] = useState<string | null>(null);
+  const list = useRef<HTMLUListElement>(null);
   const tree = buildTree(folders, notes);
+  const listed = reveal !== null && notes.includes(reveal.path);
+
+  useEffect(() => {
+    if (!reveal || !listed) return;
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      for (let p = parentOf(reveal.path); p; p = parentOf(p)) next.delete(p);
+      return next;
+    });
+    setFlashing(reveal.path);
+    // Scroll once the opened folders have rendered.
+    const frame = requestAnimationFrame(() => {
+      const row = [...(list.current?.querySelectorAll<HTMLElement>("[data-note]") ?? [])].find(
+        (el) => el.dataset.note === reveal.path
+      );
+      row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    const timer = window.setTimeout(() => setFlashing(null), 1500);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [reveal, listed]);
 
   function toggle(path: string) {
     setCollapsed((prev) => {
@@ -107,9 +136,10 @@ export function FileTree({
           return (
             <li key={note}>
               <div
-                className={`group flex items-center justify-between gap-2 py-1 pr-2 ${
+                data-note={note}
+                className={`group flex items-center justify-between gap-2 py-1 pr-2 outline-1 -outline-offset-1 outline-[var(--accent)] ${
                   isSelected ? "bg-[var(--rule)]" : ""
-                }`}
+                } ${note === flashing ? "outline" : ""}`}
                 style={{ paddingLeft: depth * 14 + 8 + 18 }}
               >
                 <button
@@ -138,5 +168,9 @@ export function FileTree({
     );
   }
 
-  return <ul className="py-2">{renderFolder(tree, 0)}</ul>;
+  return (
+    <ul ref={list} className="py-2">
+      {renderFolder(tree, 0)}
+    </ul>
+  );
 }

@@ -14,31 +14,6 @@ export interface Run {
   isPasted: boolean;
 }
 
-// Finds the single contiguous region that changed between two textarea
-// values via common prefix/suffix — works uniformly for insertion,
-// deletion, and "select some text and type/paste over it".
-export function diffRange(oldValue: string, newValue: string) {
-  const maxPrefix = Math.min(oldValue.length, newValue.length);
-  let prefixLen = 0;
-  while (prefixLen < maxPrefix && oldValue[prefixLen] === newValue[prefixLen]) prefixLen++;
-
-  const maxSuffix = Math.min(oldValue.length - prefixLen, newValue.length - prefixLen);
-  let suffixLen = 0;
-  while (
-    suffixLen < maxSuffix &&
-    oldValue[oldValue.length - 1 - suffixLen] === newValue[newValue.length - 1 - suffixLen]
-  ) {
-    suffixLen++;
-  }
-
-  return {
-    oldStart: prefixLen,
-    oldEnd: oldValue.length - suffixLen,
-    newStart: prefixLen,
-    newEnd: newValue.length - suffixLen,
-  };
-}
-
 export function applyEdit(
   tags: Uint8Array,
   oldStart: number,

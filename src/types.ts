@@ -21,6 +21,7 @@ export interface PublishedDocument {
   font: FontName;
   stats: WritingStats;
   finalLength: number;
-  score: number;
+  // null: an imported note, which has no Blank Score.
+  score: number | null;
   publishedAt: number;
 }

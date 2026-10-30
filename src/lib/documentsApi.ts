@@ -9,7 +9,7 @@ interface DocumentRow {
   font: string;
   stats: WritingStats;
   final_length: number;
-  score: number;
+  score: number | null;
   published_at: string;
 }
 
@@ -20,7 +20,7 @@ function fromRow(row: DocumentRow): PublishedDocument {
     font: row.font as FontName,
     stats: row.stats,
     finalLength: row.final_length,
-    score: row.score,
+    score: row.score === null ? null : Number(row.score),
     publishedAt: new Date(row.published_at).getTime(),
   };
 }

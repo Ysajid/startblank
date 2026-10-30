@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { computeBlankScore } from "../lib/blankScore";
@@ -6,15 +6,20 @@ import { clearDraft, loadDraft, loadPrefs, resolveInitialTheme, savePrefs } from
 import { NOTE_EXT, noteTitle, parentOf, useVault, type SyncStatus } from "../lib/vaultSync";
 import { renderMarkdown, resolveLink } from "../lib/wikilinks";
 import { readMarkdownZip } from "../lib/importZip";
+import { noteHash, noteUrl, readNoteHash } from "../lib/noteLink";
 import { fetchBacklinks, searchNotes, type SearchHit } from "../lib/searchApi";
 import type { FontName, ThemeName } from "../types";
 import { FileTree } from "./FileTree";
 import { FontSwitch } from "./FontSwitch";
-import { FONT_CLASS, NoteEditor } from "./NoteEditor";
+import { FONT_CLASS } from "../fonts";
 import { PublishPanel } from "./PublishPanel";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { Wordmark } from "./Wordmark";
+
+// The editor (CodeMirror) is most of the app's weight; load it only when a
+// note is opened, so sign-in and published pages stay light.
+const NoteEditor = lazy(() => import("./NoteEditor").then((m) => ({ default: m.NoteEditor })));
 
 const SYNC_LABEL: Record<SyncStatus, string> = {
   loading: "Loading vault…",
@@ -51,7 +56,15 @@ export function Workspace({ session }: { session: Session }) {
   const { vault, snapshot } = useVault(userId);
   const { notes, folders, versions, status, notice } = snapshot;
 
-  const [selected, setSelected] = useState<string | null>(() => localStorage.getItem(lastNoteKey(userId)));
+  // A note's link (#note=…) wins over the note that was open last time.
+  const [selected, setSelected] = useState<string | null>(
+    () => readNoteHash() ?? localStorage.getItem(lastNoteKey(userId))
+  );
+  const [reveal, setReveal] = useState<{ path: string } | null>(() => {
+    const linked = readNoteHash();
+    return linked ? { path: linked } : null;
+  });
+  const [linkCopied, setLinkCopied] = useState(false);
   const [reading, setReading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -59,6 +72,7 @@ export function Workspace({ session }: { session: Session }) {
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState<ThemeName>(resolveInitialTheme);
   const [font, setFont] = useState<FontName>(() => loadPrefs().font);
+  const [showPasted, setShowPasted] = useState(() => loadPrefs().showPasted);
   const [error, setError] = useState<string | null>(null);
   const importedDraft = useRef(false);
   const zipInput = useRef<HTMLInputElement>(null);
@@ -74,19 +88,45 @@ export function Workspace({ session }: { session: Session }) {
   }, [theme]);
 
   useEffect(() => {
-    savePrefs({ theme, font });
-  }, [theme, font]);
+    savePrefs({ theme, font, showPasted });
+  }, [theme, font, showPasted]);
 
   useEffect(() => {
     if (selected) localStorage.setItem(lastNoteKey(userId), selected);
   }, [selected, userId]);
 
-  // A note can vanish under us (deleted or renamed on another device).
+  // A note can vanish under us (deleted or renamed on another device), or a
+  // link can point at one that isn't there.
   useEffect(() => {
-    if (loaded && selected && !notes[selected]) setSelected(null);
+    if (!loaded || !selected || notes[selected]) return;
+    if (readNoteHash() === selected) setError(`“${noteTitle(selected)}” isn't in your vault.`);
+    setSelected(null);
   }, [loaded, selected, notes]);
 
+  // The address bar always shows the open note's link. Opening a note adds
+  // a history entry (see open); renames and the like just correct it.
+  useEffect(() => {
+    const hash = selected ? noteHash(selected) : "";
+    if (window.location.hash !== hash) {
+      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}${hash}`);
+    }
+    setLinkCopied(false);
+  }, [selected]);
+
+  // Back/forward, or a note link pasted into the address bar.
+  useEffect(() => {
+    function onHashChange() {
+      const linked = readNoteHash();
+      if (!linked) return;
+      setSelected(linked);
+      setReveal({ path: linked });
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   const open = useCallback((path: string) => {
+    if (window.location.hash !== noteHash(path)) history.pushState(null, "", noteHash(path));
     setSelected(path);
     setReading(false);
     if (window.innerWidth < 768) setSidebarOpen(false);
@@ -199,6 +239,24 @@ export function Workspace({ session }: { session: Session }) {
     open(created[0]);
     if (parsed.skipped > 0) {
       setError(`Imported ${created.length} notes; skipped ${parsed.skipped} files that aren't Markdown.`);
+    }
+  }
+
+  // Shows the open note in the sidebar: folders opened, scrolled to, flashed.
+  function locate() {
+    if (!selected) return;
+    setQuery("");
+    setSidebarOpen(true);
+    setReveal({ path: selected });
+  }
+
+  async function copyLink() {
+    if (!selected) return;
+    try {
+      await navigator.clipboard.writeText(noteUrl(selected));
+      setLinkCopied(true);
+    } catch {
+      setError("Couldn't copy the link.");
     }
   }
 
@@ -434,6 +492,7 @@ export function Workspace({ session }: { session: Session }) {
                   notes={paths}
                   dirty={dirty}
                   selected={selected}
+                  reveal={reveal}
                   actions={{ onOpen: open, onNewNote: (f) => createNote(f), onRename: rename, onDelete: remove }}
                 />
               )}
@@ -461,13 +520,26 @@ export function Workspace({ session }: { session: Session }) {
                   aria-label="Note title"
                   className={`${FONT_CLASS[font]} min-w-0 flex-1 border-none bg-transparent text-2xl text-[var(--fg)] focus:outline-none`}
                 />
-                <button type="button" className={headerButton} onClick={() => setReading((r) => !r)}>
-                  {reading ? "Write" : "Read"}
-                </button>
+                <div className="flex shrink-0 items-center gap-4">
+                  <button type="button" className={headerButton} onClick={locate} title="Show in the sidebar">
+                    Locate
+                  </button>
+                  <button type="button" className={headerButton} onClick={copyLink} title={noteUrl(selected)}>
+                    {linkCopied ? "Copied" : "Link"}
+                  </button>
+                  <button type="button" className={headerButton} onClick={() => setReading((r) => !r)}>
+                    {reading ? "Write" : "Read"}
+                  </button>
+                </div>
               </div>
-              {parentOf(selected) ? (
-                <p className="mt-1 font-write-mono text-[11px] text-[var(--fg-muted)]">{parentOf(selected)}</p>
-              ) : null}
+              <button
+                type="button"
+                onClick={locate}
+                title="Show in the sidebar"
+                className="mt-1 self-start font-write-mono text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)]"
+              >
+                {parentOf(selected) ? parentOf(selected).split("/").join(" / ") : "Vault"} / {noteTitle(selected)}
+              </button>
 
               <div className="mt-8 flex-1">
                 {reading ? (
@@ -484,12 +556,17 @@ export function Workspace({ session }: { session: Session }) {
                     dangerouslySetInnerHTML={{ __html: previewHtml }}
                   />
                 ) : (
-                  <NoteEditor
-                    key={`${selected}#${versions[selected] ?? 0}`}
-                    note={note}
-                    font={font}
-                    onChange={(body, stats, ranges) => vault.updateNote(selected, body, stats, ranges)}
-                  />
+                  <Suspense fallback={null}>
+                    <NoteEditor
+                      key={`${selected}#${versions[selected] ?? 0}`}
+                      note={note}
+                      font={font}
+                      showPasted={showPasted}
+                      paths={paths}
+                      onFollowLink={followLink}
+                      onChange={(body, stats, ranges) => vault.updateNote(selected, body, stats, ranges)}
+                    />
+                  </Suspense>
                 )}
               </div>
 
@@ -521,12 +598,23 @@ export function Workspace({ session }: { session: Session }) {
                     characters · {wordCount} {wordCount === 1 ? "word" : "words"}
                   </div>
                 </div>
+                <div className="self-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowPasted((s) => !s)}
+                    aria-pressed={showPasted}
+                    title="Highlighting only — pasted text counts toward the Blank Score either way"
+                    className={headerButton}
+                  >
+                    Pasted: {showPasted ? "shown" : "hidden"}
+                  </button>
+                </div>
                 <div className="text-right">
                   <div className="font-write-mono text-xl leading-none tabular-nums text-[var(--fg)]">
-                    {charCount === 0 ? "—" : score.toFixed(1)}
+                    {charCount === 0 || note.imported ? "—" : score.toFixed(1)}
                   </div>
                   <div className="mt-1 font-write-mono text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">
-                    blank score
+                    {note.imported ? "imported · no blank score" : "blank score"}
                   </div>
                 </div>
               </footer>
@@ -579,7 +667,7 @@ export function Workspace({ session }: { session: Session }) {
         <PublishPanel
           open={publishOpen}
           onClose={() => setPublishOpen(false)}
-          getSnapshot={() => ({ content: note.body, stats: { ...note.stats } })}
+          getSnapshot={() => ({ content: note.body, stats: { ...note.stats }, imported: note.imported === true })}
           theme={theme}
           font={font}
         />

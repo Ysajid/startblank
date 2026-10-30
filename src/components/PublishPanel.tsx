@@ -3,11 +3,12 @@ import { computeBlankScore } from "../lib/blankScore";
 import { buildShareUrl, linkedInShareUrl } from "../lib/share";
 import { publishDocument } from "../lib/documentsApi";
 import type { FontName, ThemeName, WritingStats } from "../types";
-import { ScoreMeter } from "./ScoreMeter";
+import { ImportedNotice, ScoreMeter } from "./ScoreMeter";
 
 interface Snapshot {
   content: string;
   stats: WritingStats;
+  imported: boolean;
 }
 
 export function PublishPanel({
@@ -56,7 +57,7 @@ export function PublishPanel({
         font,
         stats: snapshot.stats,
         finalLength,
-        score: breakdown.score,
+        score: snapshot.imported ? null : breakdown.score,
       });
       setShareUrl(buildShareUrl(slug));
       setStage("done");
@@ -105,7 +106,7 @@ export function PublishPanel({
             <dd className="tabular-nums text-right">{snapshot.stats.edits}</dd>
           </dl>
 
-          <ScoreMeter score={breakdown.score} label="Blank score" />
+          {snapshot.imported ? <ImportedNotice /> : <ScoreMeter score={breakdown.score} label="Blank score" />}
 
           <p className="text-[13px] leading-relaxed text-[var(--fg-muted)]">
             Publishing freezes this text as a read-only page anyone with the
@@ -126,7 +127,7 @@ export function PublishPanel({
         </div>
       ) : (
         <div className="mt-8 flex flex-col gap-6">
-          <ScoreMeter score={breakdown.score} label="Blank score" />
+          {snapshot.imported ? <ImportedNotice /> : <ScoreMeter score={breakdown.score} label="Blank score" />}
 
           <div>
             <label

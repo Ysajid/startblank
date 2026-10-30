@@ -154,7 +154,15 @@ export class VaultSync {
   private buildSnapshot(): VaultSnapshot {
     const notes: Record<string, Note> = {};
     for (const [path, e] of this.entries) {
-      notes[path] = { path, body: e.body, stats: e.stats, pasteRanges: e.pasteRanges, dirty: e.dirty, loaded: e.loaded };
+      notes[path] = {
+        path,
+        body: e.body,
+        stats: e.stats,
+        pasteRanges: e.pasteRanges,
+        imported: e.imported,
+        dirty: e.dirty,
+        loaded: e.loaded,
+      };
     }
     const folders = new Set(this.folders);
     for (const path of this.entries.keys()) {
@@ -433,13 +441,13 @@ export class VaultSync {
     return target;
   }
 
-  // Adds notes brought in from elsewhere (a zip import). They have no
-  // record, so — as with any outside edit — every character counts as not
-  // written here. Names that are taken get a number. Returns the new paths.
+  // Adds notes brought in from elsewhere (a zip import). They're marked as
+  // imported and get no Blank Score, so their text isn't marked as pasted
+  // either. Names that are taken get a number. Returns the new paths.
   importNotes(notes: { path: string; body: string }[]): string[] {
     const created = notes.map(({ path, body }) => {
       const target = this.uniquePath(path);
-      this.entries.set(target, unsaved(loadNote(body, null).content));
+      this.entries.set(target, unsaved({ body, stats: emptyStats(), pasteRanges: [], imported: true }));
       this.scheduleSave(target, 0);
       return target;
     });

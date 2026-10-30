@@ -13,7 +13,11 @@ export interface Draft {
 export interface Prefs {
   theme: ThemeName;
   font: FontName;
+  // Whether pasted text is highlighted while writing. It's counted either way.
+  showPasted: boolean;
 }
+
+const DEFAULT_PREFS: Prefs = { theme: "light", font: "typewriter", showPasted: true };
 
 export function loadDraft(): Draft | null {
   const raw = localStorage.getItem(DRAFT_KEY);
@@ -41,15 +45,16 @@ export function clearDraft(): void {
 
 export function loadPrefs(): Prefs {
   const raw = localStorage.getItem(PREFS_KEY);
-  if (!raw) return { theme: "light", font: "typewriter" };
+  if (!raw) return DEFAULT_PREFS;
   try {
     const parsed = JSON.parse(raw);
     return {
-      theme: parsed.theme ?? "light",
-      font: parsed.font ?? "typewriter",
+      theme: parsed.theme ?? DEFAULT_PREFS.theme,
+      font: parsed.font ?? DEFAULT_PREFS.font,
+      showPasted: parsed.showPasted ?? DEFAULT_PREFS.showPasted,
     };
   } catch {
-    return { theme: "light", font: "typewriter" };
+    return DEFAULT_PREFS;
   }
 }
 

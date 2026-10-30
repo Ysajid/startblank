@@ -2,6 +2,7 @@ import { Marked, type TokenizerAndRendererExtension } from "marked";
 import DOMPurify from "dompurify";
 import { stripFrontmatter } from "./noteFile";
 import { noteTitle } from "./vaultSync";
+import { noteHash } from "./noteLink";
 
 // Obsidian-style links: [[Note]], [[Folder/Note]], [[Note|shown text]],
 // [[Note#Heading]]. A link resolves to the note whose path matches, else
@@ -47,8 +48,11 @@ export function renderMarkdown(body: string, paths: string[]): string {
       return { type: "wikilink", raw: match[0], target: match[1].trim(), label: (match[2] ?? match[1]).trim() };
     },
     renderer(token) {
-      const resolved = resolveLink(token.target, paths) !== null;
-      return `<a href="#" class="wikilink${resolved ? "" : " wikilink-missing"}" data-target="${escapeHtml(
+      // A resolved link carries the note's real address, so it can be
+      // opened in a new tab; a plain click is handled by the workspace.
+      const resolved = resolveLink(token.target, paths);
+      const href = resolved ? noteHash(resolved) : "#";
+      return `<a href="${escapeHtml(href)}" class="wikilink${resolved ? "" : " wikilink-missing"}" data-target="${escapeHtml(
         token.target
       )}">${escapeHtml(token.label)}</a>`;
     },

@@ -1,5 +1,21 @@
 import { useState } from "react";
 
+// Shown in place of the score for a note that was imported, not written here.
+export function ImportedNotice() {
+  return (
+    <div>
+      <div className="font-write-mono text-4xl text-[var(--fg-muted)]">—</div>
+      <div className="mt-3 h-[2px] w-full bg-[var(--rule)]" />
+      <p className="mt-2 font-write-mono text-[11px] uppercase tracking-wide text-[var(--fg-muted)]">
+        Imported · no blank score
+      </p>
+      <p className="mt-2 text-[12px] leading-relaxed text-[var(--fg-muted)]">
+        This text was imported from elsewhere, not written in startblank.
+      </p>
+    </div>
+  );
+}
+
 export function ScoreMeter({ score, label }: { score: number; label?: string }) {
   const [infoOpen, setInfoOpen] = useState(false);
   const rounded = Math.round(score * 10) / 10;

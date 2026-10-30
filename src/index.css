@@ -128,3 +128,102 @@ textarea:focus {
   padding: 0.3em 0.6em;
 }
 .note-preview img { max-width: 100%; }
+
+/* Live-preview editor (src/lib/editor/livePreview.ts). Sizes match the
+   reading view so switching between them doesn't jump. */
+.note-editor .cm-editor {
+  font-size: 1.2rem;
+  color: var(--fg);
+  background: transparent;
+}
+.note-editor .cm-editor.cm-focused {
+  outline: none;
+}
+.note-editor .cm-scroller {
+  font-family: inherit;
+  line-height: 1.625;
+  overflow: visible;
+}
+.note-editor .cm-content {
+  min-height: 60vh;
+  padding: 0;
+  caret-color: var(--fg);
+}
+.note-editor .cm-line {
+  padding: 0;
+}
+.note-editor .cm-placeholder {
+  font-style: italic;
+  color: var(--fg-muted);
+}
+.note-editor .cm-pasted {
+  background-color: var(--paste-mark);
+}
+.note-editor.hide-pasted .cm-pasted {
+  background-color: transparent;
+}
+.note-editor .cm-h1 { font-size: 1.6em; line-height: 1.3; }
+.note-editor .cm-h2 { font-size: 1.35em; line-height: 1.3; }
+.note-editor .cm-h3 { font-size: 1.15em; line-height: 1.35; }
+.note-editor .cm-h1,
+.note-editor .cm-h2,
+.note-editor .cm-h3 {
+  padding-top: 0.4em;
+}
+.note-editor .cm-mono,
+.note-editor .cm-inline-code,
+.note-editor .cm-codeblock {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+.note-editor .cm-inline-code {
+  background: var(--surface);
+  padding: 0.1em 0;
+}
+.note-editor .cm-codeblock {
+  background: var(--surface);
+  padding: 0 1em;
+}
+.note-editor .cm-quote {
+  border-left: 2px solid var(--accent);
+  padding-left: 1em;
+  color: var(--fg-muted);
+}
+.note-editor .cm-hr {
+  background: linear-gradient(var(--rule), var(--rule)) center / 100% 1px no-repeat;
+}
+.note-editor .cm-bullet {
+  color: var(--fg-muted);
+}
+.note-editor .cm-task {
+  margin: 0 0.35em 0 0;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.note-editor .cm-task-done {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+}
+.note-editor .cm-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.note-editor .cm-link-missing {
+  opacity: 0.6;
+  text-decoration-style: dashed;
+}
+.note-editor .cm-wikilink-raw {
+  color: var(--accent);
+}
+.note-editor .cm-frontmatter {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8em;
+  color: var(--fg-muted);
+}
+.note-editor .cm-frontmatter * {
+  font-size: inherit !important;
+  font-weight: normal !important;
+}

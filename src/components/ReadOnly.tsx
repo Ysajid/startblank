@@ -1,15 +1,9 @@
 import { useEffect } from "react";
 import { linkedInShareUrl } from "../lib/share";
-import type { FontName, PublishedDocument } from "../types";
-import { ScoreMeter } from "./ScoreMeter";
+import type { PublishedDocument } from "../types";
+import { ImportedNotice, ScoreMeter } from "./ScoreMeter";
 import { Wordmark } from "./Wordmark";
-
-const FONT_CLASS: Record<FontName, string> = {
-  typewriter: "font-write-typewriter",
-  serif: "font-write-serif",
-  sans: "font-write-sans",
-  mono: "font-write-mono",
-};
+import { FONT_CLASS } from "../fonts";
 
 export function ReadOnly({ doc }: { doc: PublishedDocument }) {
   useEffect(() => {
@@ -48,7 +42,7 @@ export function ReadOnly({ doc }: { doc: PublishedDocument }) {
 
       <div className="mx-auto flex max-w-[720px] flex-col gap-6 border-b border-[var(--rule)] px-6 pb-8 pt-8 sm:flex-row sm:items-start sm:justify-between">
         <div className="w-full max-w-[200px] sm:order-2">
-          <ScoreMeter score={doc.score} label="Blank score" />
+          {doc.score === null ? <ImportedNotice /> : <ScoreMeter score={doc.score} label="Blank score" />}
         </div>
         <div className="sm:order-1">
           <div className="font-write-mono text-4xl tabular-nums text-[var(--fg)]">

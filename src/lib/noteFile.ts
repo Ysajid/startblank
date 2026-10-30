@@ -13,6 +13,9 @@ export interface NoteContent {
   body: string;
   stats: WritingStats;
   pasteRanges: PasteRange[];
+  // Brought in from elsewhere (a zip import): it wasn't written here, so it
+  // has no Blank Score, however much is typed into it afterwards.
+  imported?: boolean;
 }
 
 interface StoredRecord {
@@ -23,6 +26,7 @@ interface StoredRecord {
   pastedChars: number;
   pasted: [number, number][];
   body: string;
+  imported?: true;
 }
 
 function isCount(n: unknown): n is number {
@@ -33,7 +37,7 @@ function emptyStats(): WritingStats {
   return { keystrokes: 0, edits: 0, pasteEvents: 0, pastedChars: 0 };
 }
 
-export function serializeRecord({ body, stats, pasteRanges }: NoteContent): string {
+export function serializeRecord({ body, stats, pasteRanges, imported }: NoteContent): string {
   const record: StoredRecord = {
     v: 2,
     keystrokes: stats.keystrokes,
@@ -42,6 +46,7 @@ export function serializeRecord({ body, stats, pasteRanges }: NoteContent): stri
     pastedChars: stats.pastedChars,
     pasted: pasteRanges.map((r) => [r.start, r.length]),
     body,
+    ...(imported ? { imported: true as const } : {}),
   };
   return JSON.stringify(record);
 }
@@ -67,6 +72,7 @@ function parseRecord(text: string | null): NoteContent | null {
       pasteRanges: r.pasted
         .filter((p: unknown) => Array.isArray(p) && isCount(p[0]) && isCount(p[1]))
         .map(([start, length]: [number, number]) => ({ start, length })),
+      ...(r.imported === true ? { imported: true } : {}),
     };
   } catch {
     return null;
@@ -197,7 +203,7 @@ function reconcile(recorded: NoteContent, body: string): NoteContent {
     stats.pastedChars = Math.max(0, stats.pastedChars - removedPastedChars) + inserted;
     if (inserted > 0) stats.pasteEvents += 1;
   }
-  return { body, stats, pasteRanges: pasteRangesFromTags(tags) };
+  return { ...recorded, body, stats, pasteRanges: pasteRangesFromTags(tags) };
 }
 
 // ---- Loading -----------------------------------------------------------------

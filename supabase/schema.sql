@@ -22,9 +22,13 @@ create table if not exists public.documents (
   font text not null,
   stats jsonb not null,
   final_length integer not null,
-  score numeric not null,
+  -- null for a note that was imported rather than written here
+  score numeric,
   published_at timestamptz not null default now()
 );
+
+-- Installs from before imports: published imported notes have no score.
+alter table public.documents alter column score drop not null;
 
 alter table public.documents enable row level security;
 

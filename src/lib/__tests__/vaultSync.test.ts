@@ -119,7 +119,7 @@ describe("VaultSync across two devices", async () => {
 describe("VaultSync.importNotes", async () => {
   const { VaultSync } = await import("../vaultSync");
 
-  it("saves imported notes, numbering names that are taken, as not written here", async () => {
+  it("saves imported notes, numbering names that are taken, marked as imported", async () => {
     const a = new VaultSync();
     await a.start();
     a.createNote("Ideas/Walk.md");
@@ -130,6 +130,15 @@ describe("VaultSync.importNotes", async () => {
     expect(created).toEqual(["Ideas/Walk 2.md", "Inbox.md"]);
     await a.flushNow();
     expect(db.get("Ideas/Walk 2.md")!.body).toBe("imported");
-    expect(db.get("Inbox.md")!.record).toContain('"pastedChars":2');
+    expect(db.get("Inbox.md")!.record).toContain('"imported":true');
+    expect(db.get("Inbox.md")!.record).toContain('"pasted":[]');
+
+    // Stays imported after editing, and when opened on another device.
+    a.updateNote("Inbox.md", "hi there", S(6), []);
+    await a.flushNow();
+    const b = new VaultSync();
+    await b.start();
+    await b.ensureLoaded("Inbox.md");
+    expect(b.getSnapshot().notes["Inbox.md"].imported).toBe(true);
   });
 });
